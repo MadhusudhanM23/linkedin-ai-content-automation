@@ -1,0 +1,16 @@
+Create a professional LinkedIn technology visual for:
+
+Topic: {{TOPIC}}
+Concept: {{IMAGE_CONCEPT}}
+
+Requirements:
+- Clean modern developer aesthetic.
+- 1:1 or 4:5 composition.
+- Strong visual hierarchy.
+- Minimal text.
+- No paragraphs.
+- No fake statistics.
+- No copyrighted logos unless explicitly provided.
+- Use diagrams, code-like visual elements, abstract technology shapes,
+  or a simple conceptual illustration.
+- Make the visual understandable without reading the LinkedIn post.

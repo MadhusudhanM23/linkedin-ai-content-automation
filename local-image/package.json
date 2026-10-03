@@ -1,0 +1,15 @@
+{
+  "name": "linkedin-automation-local-image",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-cost local image service: deterministic SVG/PNG poster generator with optional ComfyUI path",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "preview": "node scripts/preview.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

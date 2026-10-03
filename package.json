@@ -1,0 +1,46 @@
+{
+  "name": "linkedin-ai-content-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-API-spend LinkedIn content automation: Google Sheets -> Gemini research -> AI post -> local image -> LinkedIn",
+  "keywords": [
+    "linkedin",
+    "automation",
+    "gemini",
+    "google-sheets",
+    "content-automation",
+    "social-media",
+    "apps-script",
+    "n8n",
+    "self-hosted"
+  ],
+  "homepage": "https://github.com/MadhusudhanM23/linkedin-ai-content-automation#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MadhusudhanM23/linkedin-ai-content-automation.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MadhusudhanM23/linkedin-ai-content-automation/issues",
+    "email": "madhusudhan2315@gmail.com"
+  },
+  "author": "Madhusudhan M <madhusudhan2315@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node tests/acceptance.test.js",
+    "build": "node scripts/build-workflow.js",
+    "image": "node local-image/server.js",
+    "preview": "node local-image/scripts/preview.js",
+    "doctor": "node scripts/doctor.js",
+    "n8n": "docker compose up -d",
+    "n8n:logs": "docker compose logs -f n8n",
+    "n8n:stop": "docker compose down",
+    "run": "node scripts/run-once.js",
+    "run:live": "node scripts/run-once.js --live",
+    "sheet": "node scripts/sheet-test.js",
+    "install": "powershell -ExecutionPolicy Bypass -File scripts/install-schedule.ps1",
+    "uninstall": "powershell -ExecutionPolicy Bypass -File scripts/install-schedule.ps1 -Remove"
+  }
+}

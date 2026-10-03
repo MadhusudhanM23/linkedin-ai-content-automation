@@ -1,0 +1,55 @@
+# Self-hosted n8n Community Edition (spec section 2: no n8n Cloud subscription).
+#
+#   docker compose up -d
+#   editor: http://localhost:5678
+#
+# The local image service runs on the HOST, not in a container, so it can reach
+# the GPU if ComfyUI is ever added. n8n reaches it via host.docker.internal.
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: linkedin-automation-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}
+      - TZ=${TZ:-Asia/Kolkata}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      # Code nodes hash with node:crypto for the idempotency key and content hash.
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+      # The workflow reads configuration from $env in expressions.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_SECURE_COOKIE=false
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=336
+      # --- workflow configuration (read via $env in the nodes) ---
+      - GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
+      - GOOGLE_SHEET_NAME=${GOOGLE_SHEET_NAME:-Sheet1}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_BASE=${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_RESEARCH_MODEL=${GEMINI_RESEARCH_MODEL:-gemini-2.5-flash}
+      - LINKEDIN_API_VERSION=${LINKEDIN_API_VERSION:-202609}
+      - IMAGE_SERVICE_URL=${IMAGE_SERVICE_URL:-http://host.docker.internal:8411}
+      - IMAGE_SERVICE_TOKEN=${IMAGE_SERVICE_TOKEN:-}
+      - COMFYUI_ENABLED=${COMFYUI_ENABLED:-false}
+      - AUTO_PUBLISH=${AUTO_PUBLISH:-false}
+      - ENABLE_RESEARCH=${ENABLE_RESEARCH:-true}
+      - ENABLE_IMAGE=${ENABLE_IMAGE:-true}
+      - TIMEZONE=${TIMEZONE:-Asia/Kolkata}
+      - STALE_MINUTES=${STALE_MINUTES:-30}
+      - MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
+      - ALLOW_MULTIPLE_PER_DAY=${ALLOW_MULTIPLE_PER_DAY:-false}
+    volumes:
+      - ./n8n-data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

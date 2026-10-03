@@ -1,0 +1,1006 @@
+{
+  "id": "LinkedInAutoMain1",
+  "name": "LinkedIn AI Content Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "node-001",
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SHEET_API_URL }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "={{ $env.SHEET_API_TOKEN }}"
+            },
+            {
+              "name": "action",
+              "value": "read"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "node-002",
+      "name": "Read Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        370
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// AUTO-GENERATED from lib/time.js and lib/scheduler.js by scripts/build-workflow.js.\n// Do not edit here - edit lib/ and re-run the builder.\nconst crypto = require('crypto');\nfunction sha256(value) { return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex'); }\n\n/**\r\n * Timezone-aware date/time helpers for the LinkedIn automation scheduler.\r\n *\r\n * Pure functions with no external dependencies. scripts/build-workflow.js\r\n * inlines this file verbatim into the n8n Code nodes, and tests/ exercises it\r\n * directly, so the tested code is exactly the code that runs inside n8n.\r\n */\r\n\r\nconst MS_PER_DAY = 86400000;\r\n\r\n/** Google Sheets serial-date epoch (serial 0 == 1899-12-30). */\r\nconst SHEETS_EPOCH_MS = Date.UTC(1899, 11, 30);\r\n\r\nfunction pad2(n) {\r\n  return String(n).padStart(2, '0');\r\n}\r\n\r\n/**\r\n * Wall-clock parts for `date` as observed in `timeZone`.\r\n * Intl does the offset/DST arithmetic so we never hand-roll it.\r\n */\r\nfunction zonedParts(date, timeZone) {\r\n  const fmt = new Intl.DateTimeFormat('en-CA', {\r\n    timeZone,\r\n    year: 'numeric', month: '2-digit', day: '2-digit',\r\n    hour: '2-digit', minute: '2-digit', second: '2-digit',\r\n    hour12: false,\r\n  });\r\n  const p = {};\r\n  for (const part of fmt.formatToParts(date)) p[part.type] = part.value;\r\n  // Some ICU builds emit \"24\" for midnight under hour12:false.\r\n  const hour = p.hour === '24' ? '00' : p.hour;\r\n  return {\r\n    ymd: p.year + '-' + p.month + '-' + p.day,\r\n    year: Number(p.year),\r\n    month: Number(p.month),\r\n    day: Number(p.day),\r\n    hour: Number(hour),\r\n    minute: Number(p.minute),\r\n    second: Number(p.second),\r\n    minutes: Number(hour) * 60 + Number(p.minute),\r\n  };\r\n}\r\n\r\n/** Current date in `timeZone` as YYYY-MM-DD. */\r\nfunction todayInZone(timeZone, now) {\r\n  return zonedParts(now || new Date(), timeZone).ymd;\r\n}\r\n\r\n/**\r\n * True when `value` is an IANA timezone this runtime recognizes.\r\n *\r\n * Worth checking because B1 is often part of a merged cell: Sheets can report\r\n * the merge's value (\"11.00AM\") for every cell it covers, and feeding that to\r\n * Intl throws a RangeError that would take the whole Code node down.\r\n */\r\nfunction isValidTimeZone(value) {\r\n  if (!value || typeof value !== 'string') return false;\r\n  try {\r\n    new Intl.DateTimeFormat('en-CA', { timeZone: value }).format(new Date());\r\n    return true;\r\n  } catch (_) {\r\n    return false;\r\n  }\r\n}\r\n\r\n/** Build YYYY-MM-DD, rejecting impossible calendar dates like 31/02. */\r\nfunction isoOrNull(year, month, day) {\r\n  if (!(year >= 1970 && year <= 9999)) return null;\r\n  if (!(month >= 1 && month <= 12)) return null;\r\n  if (!(day >= 1 && day <= 31)) return null;\r\n  const probe = new Date(Date.UTC(year, month - 1, day));\r\n  if (probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;\r\n  return year + '-' + pad2(month) + '-' + pad2(day);\r\n}\r\n\r\n/**\r\n * Normalize a Column B date cell to YYYY-MM-DD, or null if unparseable.\r\n *\r\n * Google Sheets hands the same cell back in several shapes depending on the\r\n * node's value-render mode and the user's locale, so all of them are accepted:\r\n *   - Date object / ISO datetime string  (already parsed by n8n)\r\n *   - serial number                      (UNFORMATTED_VALUE)\r\n *   - \"DD/MM/YYYY\", \"D/M/YY\"             (the format the spec documents)\r\n *   - \"YYYY-MM-DD\"                       (ISO date)\r\n *   - \"03 Oct 2026\", \"Oct 3, 2026\"       (locale text)\r\n *\r\n * Slash dates are read DAY-FIRST per the spec: 03/10/2026 is 3 October 2026,\r\n * never 10 March. Reading it the other way would publish on the wrong day.\r\n */\r\nfunction parseSheetDate(value, timeZone) {\r\n  if (value === null || value === undefined) return null;\r\n\r\n  if (value instanceof Date) {\r\n    if (Number.isNaN(value.getTime())) return null;\r\n    return zonedParts(value, timeZone).ymd;\r\n  }\r\n\r\n  if (typeof value === 'number' && Number.isFinite(value)) {\r\n    // Serial days already carry wall-clock time, so read UTC parts directly\r\n    // rather than shifting them through a timezone a second time.\r\n    const d = new Date(SHEETS_EPOCH_MS + Math.floor(value) * MS_PER_DAY);\r\n    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());\r\n  }\r\n\r\n  const raw = String(value).trim();\r\n  if (!raw) return null;\r\n\r\n  // A serial number that arrived as text.\r\n  if (/^\\d+(\\.\\d+)?$/.test(raw) && Number(raw) > 1000) {\r\n    return parseSheetDate(Number(raw), timeZone);\r\n  }\r\n\r\n  // ISO date, optionally with a time component.\r\n  let m = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ]|$)/);\r\n  if (m) return isoOrNull(Number(m[1]), Number(m[2]), Number(m[3]));\r\n\r\n  // Day-first slash/dot/dash dates.\r\n  m = raw.match(/^(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2,4})$/);\r\n  if (m) {\r\n    let year = Number(m[3]);\r\n    if (m[3].length === 2) year += year < 70 ? 2000 : 1900;\r\n    return isoOrNull(year, Number(m[2]), Number(m[1]));\r\n  }\r\n\r\n  // Fall back to the engine's parser for textual months (\"03 Oct 2026\").\r\n  const parsed = new Date(raw);\r\n  if (!Number.isNaN(parsed.getTime())) {\r\n    // Non-ISO date-only strings are parsed as LOCAL midnight by the engine, so\r\n    // read local parts back. Converting through a timezone here would shift the\r\n    // date by a day on any host whose offset differs from the target zone.\r\n    // (ISO \"YYYY-MM-DD\" is parsed as UTC, but the regex above already caught it.)\r\n    if (!/[T:]|[+-]\\d{2}:?\\d{2}$|Z$/.test(raw)) {\r\n      return parsed.getFullYear() + '-' + pad2(parsed.getMonth() + 1) + '-' + pad2(parsed.getDate());\r\n    }\r\n    return zonedParts(parsed, timeZone).ymd;\r\n  }\r\n\r\n  return null;\r\n}\r\n\r\nfunction fractionToMinutes(n) {\r\n  if (n < 0) return null;\r\n  const minutes = Math.round((n % 1) * 1440);\r\n  return minutes >= 1440 ? 0 : minutes;\r\n}\r\n\r\n/**\r\n * Normalize an A1 posting-time cell to minutes since midnight, or null.\r\n *\r\n * Accepts \"11:00 AM\", \"11:00\", \"11:00:00\", \"1:05 pm\", \"11 AM\", a Sheets time\r\n * fraction (0.4583333 == 11:00), and the 1899-12-30T11:00:00 datetime shape\r\n * the Sheets API returns for time-formatted cells.\r\n */\r\nfunction parseClockTime(value, timeZone) {\r\n  if (value === null || value === undefined) return null;\r\n\r\n  if (value instanceof Date) {\r\n    if (Number.isNaN(value.getTime())) return null;\r\n    // Time-only cells come back anchored to the Sheets epoch in UTC.\r\n    if (value.getTime() < Date.UTC(1900, 0, 1)) {\r\n      return value.getUTCHours() * 60 + value.getUTCMinutes();\r\n    }\r\n    return zonedParts(value, timeZone).minutes;\r\n  }\r\n\r\n  if (typeof value === 'number' && Number.isFinite(value)) {\r\n    return fractionToMinutes(value);\r\n  }\r\n\r\n  const raw = String(value).trim();\r\n  if (!raw) return null;\r\n\r\n  // Sheets epoch datetime standing in for a time-only cell.\r\n  const epochMatch = raw.match(/^1899-12-30T(\\d{2}):(\\d{2})/);\r\n  if (epochMatch) return Number(epochMatch[1]) * 60 + Number(epochMatch[2]);\r\n\r\n  if (/^\\d*\\.\\d+$/.test(raw)) return fractionToMinutes(Number(raw));\r\n\r\n  const m = raw.match(/^(\\d{1,2})[:.](\\d{2})(?::(\\d{2}))?\\s*([AaPp])?\\.?[Mm]?\\.?$/);\r\n  if (m) {\r\n    let hour = Number(m[1]);\r\n    const minute = Number(m[2]);\r\n    if (minute > 59) return null;\r\n    const meridiem = m[4] ? m[4].toLowerCase() : null;\r\n    if (meridiem) {\r\n      if (hour < 1 || hour > 12) return null;\r\n      if (meridiem === 'p' && hour !== 12) hour += 12;\r\n      if (meridiem === 'a' && hour === 12) hour = 0;\r\n    } else if (hour > 23) {\r\n      return null;\r\n    }\r\n    return hour * 60 + minute;\r\n  }\r\n\r\n  // \"11 AM\" with no minutes.\r\n  const hourOnly = raw.match(/^(\\d{1,2})\\s*([AaPp])\\.?[Mm]\\.?$/);\r\n  if (hourOnly) {\r\n    let hour = Number(hourOnly[1]);\r\n    if (hour < 1 || hour > 12) return null;\r\n    const meridiem = hourOnly[2].toLowerCase();\r\n    if (meridiem === 'p' && hour !== 12) hour += 12;\r\n    if (meridiem === 'a' && hour === 12) hour = 0;\r\n    return hour * 60;\r\n  }\r\n\r\n  return null;\r\n}\r\n\r\n/** \"11:00 AM\" style rendering, for logs and sheet writes. */\r\nfunction formatMinutes(minutes) {\r\n  const h = Math.floor(minutes / 60);\r\n  const suffix = h < 12 ? 'AM' : 'PM';\r\n  const h12 = h % 12 === 0 ? 12 : h % 12;\r\n  return h12 + ':' + pad2(minutes % 60) + ' ' + suffix;\r\n}\r\n\r\n/** Sheet-friendly timestamp: DD/MM/YYYY HH:MM:SS in the configured zone. */\r\nfunction formatTimestamp(date, timeZone) {\r\n  const p = zonedParts(date, timeZone);\r\n  return pad2(p.day) + '/' + pad2(p.month) + '/' + p.year + ' ' +\r\n    pad2(p.hour) + ':' + pad2(p.minute) + ':' + pad2(p.second);\r\n}\n\n/**\r\n * Sheet interpretation + due-row selection.\r\n *\r\n * Everything here is a pure function over the raw `values` matrix that the\r\n * Google Sheets API returns for the whole range (A:L). Keeping it pure is what\r\n * makes the acceptance matrix in tests/ runnable without n8n, Google, or a\r\n * clock. scripts/build-workflow.js inlines this file into the n8n Code node.\r\n */\r\n\r\n\nconst STATUS = {\r\n  PENDING: 'Pending',\r\n  PROCESSING: 'Processing',\r\n  RESEARCHING: 'Researching',\r\n  GENERATING: 'Generating',\r\n  IMAGE_READY: 'ImageReady',\r\n  PUBLISHING: 'Publishing',\r\n  POSTED: 'Posted',\r\n  FAILED: 'Failed',\r\n  BLOCKED: 'Blocked',\r\n};\r\n\r\n/** Statuses that mean \"a run already owns this row\". */\r\nconst IN_FLIGHT = [\r\n  STATUS.PROCESSING, STATUS.RESEARCHING, STATUS.GENERATING,\r\n  STATUS.IMAGE_READY, STATUS.PUBLISHING,\r\n];\r\n\r\n/** Column letter -> zero-based index, for the A:L contract in docs/sheet-schema.md. */\r\nconst COL = {\r\n  day: 0, date: 1, topic: 2, status: 3, post: 4, image: 5,\r\n  postId: 6, postedAt: 7, error: 8, attempts: 9, token: 10, key: 11,\r\n};\r\n\r\nconst DEFAULTS = {\r\n  timezone: 'Asia/Kolkata',\r\n  staleMinutes: 30,\r\n  maxAttempts: 3,\r\n  allowMultiplePerDay: false,\r\n};\r\n\r\nfunction cell(row, index) {\r\n  if (!Array.isArray(row)) return '';\r\n  const v = row[index];\r\n  if (v === null || v === undefined) return '';\r\n  return v;\r\n}\r\n\r\nfunction text(row, index) {\r\n  return String(cell(row, index)).trim();\r\n}\r\n\r\n/** Case/space-insensitive status comparison; blank counts as Pending. */\r\nfunction normalizeStatus(value) {\r\n  const raw = String(value === null || value === undefined ? '' : value)\r\n    .trim().toLowerCase().replace(/[\\s_-]+/g, '');\r\n  if (!raw) return STATUS.PENDING;\r\n  for (const key of Object.keys(STATUS)) {\r\n    if (STATUS[key].toLowerCase() === raw) return STATUS[key];\r\n  }\r\n  // Tolerate common hand-typed variants rather than silently skipping the row.\r\n  if (raw === 'done' || raw === 'published' || raw === 'complete') return STATUS.POSTED;\r\n  if (raw === 'todo' || raw === 'new' || raw === 'queued') return STATUS.PENDING;\r\n  if (raw === 'error') return STATUS.FAILED;\r\n  return value ? String(value).trim() : STATUS.PENDING;\r\n}\r\n\r\nfunction parseBool(value, fallback) {\r\n  if (value === null || value === undefined || value === '') return fallback;\r\n  if (typeof value === 'boolean') return value;\r\n  const raw = String(value).trim().toLowerCase();\r\n  if (['true', 'yes', 'y', '1', 'on', 'enabled'].includes(raw)) return true;\r\n  if (['false', 'no', 'n', '0', 'off', 'disabled'].includes(raw)) return false;\r\n  return fallback;\r\n}\r\n\r\n/**\r\n * Work out where the content table starts.\r\n *\r\n * The spec puts control values in row 1 and a header row somewhere below it,\r\n * but an existing sheet may differ. Rather than assume, find the first row that\r\n * looks like headers (\"Date\"/\"Topic\"/\"Status\" in the expected columns) and take\r\n * the data as everything after it. Falls back to \"row 1 is control, data starts\r\n * at row 2\" when no header row is recognizable.\r\n */\r\nfunction detectLayout(values) {\r\n  const limit = Math.min(values.length, 10);\r\n  for (let i = 0; i < limit; i++) {\r\n    const row = values[i] || [];\r\n    const b = text(row, COL.date).toLowerCase();\r\n    const c = text(row, COL.topic).toLowerCase();\r\n    const d = text(row, COL.status).toLowerCase();\r\n    const hits = (b === 'date' ? 1 : 0) + (c === 'topic' ? 1 : 0) + (d === 'status' ? 1 : 0);\r\n    if (hits >= 2) {\r\n      return { headerRowIndex: i, dataStartIndex: i + 1, detected: true };\r\n    }\r\n  }\r\n  return { headerRowIndex: null, dataStartIndex: 1, detected: false };\r\n}\r\n\r\n/**\r\n * Read the control cells from row 1.\r\n * `env` supplies defaults so the sheet can leave B1/C1/D1/E1 blank.\r\n */\r\nfunction readSettings(values, env) {\r\n  const e = env || {};\r\n  const row1 = values[0] || [];\r\n\r\n  // B1 is frequently inside a merged block with A1, in which case Sheets may\r\n  // report the posting time here too. Only accept a real IANA zone.\r\n  const declaredZone = text(row1, 1);\r\n  const timezone = isValidTimeZone(declaredZone) ? declaredZone\r\n    : (isValidTimeZone(e.TIMEZONE) ? e.TIMEZONE : DEFAULTS.timezone);\r\n  const postingMinutes = parseClockTime(cell(row1, 0), timezone);\r\n\r\n  return {\r\n    timezone,\r\n    postingMinutes,\r\n    postingTimeRaw: text(row1, 0),\r\n    timezoneSource: isValidTimeZone(declaredZone) ? 'B1'\r\n      : (declaredZone ? 'default (B1 \"' + declaredZone + '\" is not a valid timezone)' : 'default'),\r\n    autoPublish: parseBool(cell(row1, 2), parseBool(e.AUTO_PUBLISH, false)),\r\n    enableResearch: parseBool(cell(row1, 3), parseBool(e.ENABLE_RESEARCH, true)),\r\n    enableImage: parseBool(cell(row1, 4), parseBool(e.ENABLE_IMAGE, true)),\r\n    staleMinutes: Number(e.STALE_MINUTES) > 0 ? Number(e.STALE_MINUTES) : DEFAULTS.staleMinutes,\r\n    maxAttempts: Number(e.MAX_ATTEMPTS) > 0 ? Number(e.MAX_ATTEMPTS) : DEFAULTS.maxAttempts,\r\n    allowMultiplePerDay: parseBool(e.ALLOW_MULTIPLE_PER_DAY, DEFAULTS.allowMultiplePerDay),\r\n  };\r\n}\r\n\r\n/** Collapse a topic to a stable form so trivial edits do not change its identity. */\r\nfunction normalizeTopic(topic) {\r\n  return String(topic || '').trim().toLowerCase().replace(/\\s+/g, ' ');\r\n}\r\n\r\n/**\r\n * Deterministic identity for \"this topic, on this date, at this time\".\r\n * `sha256` is injected so this file stays dependency-free for the n8n sandbox.\r\n */\r\nfunction buildIdempotencyKey(isoDate, topic, postingMinutes, sha256) {\r\n  return sha256([isoDate || '', normalizeTopic(topic), String(postingMinutes)].join('|'));\r\n}\r\n\r\n/** Turn the raw matrix into typed row objects carrying their 1-based sheet row number. */\r\nfunction parseRows(values, layout, settings, sha256) {\r\n  const out = [];\r\n  for (let i = layout.dataStartIndex; i < values.length; i++) {\r\n    const raw = values[i] || [];\r\n    const topic = text(raw, COL.topic);\r\n    const dateCell = cell(raw, COL.date);\r\n    if (!topic && !String(dateCell).trim()) continue; // genuinely blank row\r\n\r\n    const isoDate = parseSheetDate(dateCell, settings.timezone);\r\n    const attemptsRaw = text(raw, COL.attempts);\r\n    out.push({\r\n      rowNumber: i + 1,\r\n      rowIndex: i,\r\n      day: text(raw, COL.day),\r\n      dateRaw: dateCell,\r\n      isoDate,\r\n      topic,\r\n      status: normalizeStatus(cell(raw, COL.status)),\r\n      statusRaw: text(raw, COL.status),\r\n      generatedPost: text(raw, COL.post),\r\n      imageRef: text(raw, COL.image),\r\n      linkedinPostId: text(raw, COL.postId),\r\n      postedAt: text(raw, COL.postedAt),\r\n      error: text(raw, COL.error),\r\n      attempts: /^\\d+$/.test(attemptsRaw) ? Number(attemptsRaw) : 0,\r\n      runToken: text(raw, COL.token),\r\n      idempotencyKey: text(raw, COL.key) ||\r\n        (sha256 ? buildIdempotencyKey(isoDate, topic, settings.postingMinutes, sha256) : ''),\r\n    });\r\n  }\r\n  return out;\r\n}\r\n\r\n/** Minutes between `postedAt`-style sheet timestamps and now; Infinity if unreadable. */\r\nfunction minutesSince(timestamp, timezone, now) {\r\n  if (!timestamp) return Infinity;\r\n  const m = String(timestamp).trim()\r\n    .match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?/);\r\n  if (!m) {\r\n    const parsed = new Date(timestamp);\r\n    if (Number.isNaN(parsed.getTime())) return Infinity;\r\n    return (now.getTime() - parsed.getTime()) / 60000;\r\n  }\r\n  // The stamp is wall-clock in `timezone`; compare it against now rendered the\r\n  // same way, so no offset arithmetic is needed and DST cannot skew it.\r\n  const p = zonedParts(now, timezone);\r\n  const nowMins = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) / 60000;\r\n  const thenMins = Date.UTC(\r\n    Number(m[3]), Number(m[2]) - 1, Number(m[1]),\r\n    Number(m[4]), Number(m[5]), Number(m[6] || 0),\r\n  ) / 60000;\r\n  return nowMins - thenMins;\r\n}\r\n\r\n/**\r\n * Pick at most one row to process this tick.\r\n *\r\n * Returns { due: false, reason } or { due: true, row, action, ... }.\r\n * `action` is 'process' for a fresh claim or 'recover' for a stale in-flight row.\r\n */\r\nfunction selectDueRow(values, env, now, sha256) {\r\n  const clock = now || new Date();\r\n  const layout = detectLayout(values);\r\n  const settings = readSettings(values, env);\r\n\r\n  if (settings.postingMinutes === null) {\r\n    return { due: false, reason: 'A1 posting time is missing or unparseable', settings, layout };\r\n  }\r\n\r\n  const today = todayInZone(settings.timezone, clock);\r\n  const nowMinutes = zonedParts(clock, settings.timezone).minutes;\r\n  const rows = parseRows(values, layout, settings, sha256);\r\n\r\n  // Rows that already published, keyed by identity, block any twin from running.\r\n  const publishedKeys = new Set();\r\n  for (const r of rows) {\r\n    if (r.linkedinPostId && r.idempotencyKey) publishedKeys.add(r.idempotencyKey);\r\n  }\r\n\r\n  if (!settings.allowMultiplePerDay) {\r\n    const postedToday = rows.find(function (r) {\r\n      return r.isoDate === today && r.linkedinPostId;\r\n    });\r\n    if (postedToday) {\r\n      return {\r\n        due: false,\r\n        reason: 'A post already published today (row ' + postedToday.rowNumber + ')',\r\n        settings, layout, today, nowMinutes,\r\n      };\r\n    }\r\n  }\r\n\r\n  const candidates = [];\r\n  for (const row of rows) {\r\n    if (row.isoDate !== today) continue;\r\n    if (row.linkedinPostId) continue;          // never republish (spec §5, §14)\r\n    if (!row.topic) continue;\r\n    if (row.status === STATUS.POSTED) continue;\r\n    if (row.status === STATUS.BLOCKED) continue;\r\n    if (row.status === STATUS.FAILED && row.attempts >= settings.maxAttempts) continue;\r\n    if (nowMinutes < settings.postingMinutes) continue;\r\n\r\n    // A twin row already published this exact date+topic+time.\r\n    if (publishedKeys.has(row.idempotencyKey)) {\r\n      candidates.push({ row: row, action: 'block', reason: 'Duplicate of an already-published row' });\r\n      continue;\r\n    }\r\n\r\n    if (IN_FLIGHT.includes(row.status)) {\r\n      // Only reclaim once the row has clearly been abandoned, and only because\r\n      // we confirmed above that no Post ID exists for it. The claim timestamp\r\n      // rides along in the run token as \"<token>@<DD/MM/YYYY HH:MM:SS>\"; a row\r\n      // in flight with no readable stamp is treated as stale, since every claim\r\n      // this workflow makes writes one.\r\n      const stamp = row.runToken.includes('@') ? row.runToken.split('@')[1] : '';\r\n      const age = minutesSince(stamp, settings.timezone, clock);\r\n      if (age >= settings.staleMinutes) {\r\n        candidates.push({ row: row, action: 'recover', reason: 'Stale ' + row.status + ' for ' + Math.round(age) + ' min' });\r\n      }\r\n      continue;\r\n    }\r\n\r\n    if (row.status === STATUS.PENDING || row.status === STATUS.FAILED) {\r\n      candidates.push({ row: row, action: 'process', reason: 'Due and pending' });\r\n    }\r\n  }\r\n\r\n  if (!candidates.length) {\r\n    return { due: false, reason: 'No due row', settings, layout, today, nowMinutes };\r\n  }\r\n\r\n  // Earliest row wins (spec §6: \"process only the earliest row by row number\").\r\n  candidates.sort(function (a, b) { return a.row.rowNumber - b.row.rowNumber; });\r\n  const chosen = candidates[0];\r\n\r\n  return {\r\n    due: true,\r\n    action: chosen.action,\r\n    reason: chosen.reason,\r\n    row: chosen.row,\r\n    settings, layout, today, nowMinutes,\r\n    pendingCount: candidates.length,\r\n  };\r\n}\n\nconst response = $input.first().json;\nconst values = Array.isArray(response.values) ? response.values : [];\n\nconst env = {\n  TIMEZONE: $env.TIMEZONE,\n  AUTO_PUBLISH: $env.AUTO_PUBLISH,\n  ENABLE_RESEARCH: $env.ENABLE_RESEARCH,\n  ENABLE_IMAGE: $env.ENABLE_IMAGE,\n  STALE_MINUTES: $env.STALE_MINUTES,\n  MAX_ATTEMPTS: $env.MAX_ATTEMPTS,\n  ALLOW_MULTIPLE_PER_DAY: $env.ALLOW_MULTIPLE_PER_DAY,\n};\n\nconst now = new Date();\nconst decision = selectDueRow(values, env, now, sha256);\n\nif (!decision.due) {\n  return [{ json: { due: false, reason: decision.reason, today: decision.today || null, nowMinutes: decision.nowMinutes ?? null } }];\n}\n\n// AUTO_PUBLISH is the master safety switch from spec Phase 10. When it is off\n// the row is still selected and reported, but nothing downstream runs.\nif (!decision.settings.autoPublish) {\n  return [{ json: { due: false, reason: \"AUTO_PUBLISH is false; row \" + decision.row.rowNumber + \" (\" + decision.row.topic + \") would have been processed\", dryRun: true } }];\n}\n\nconst row = decision.row;\nconst runToken = crypto.randomUUID().slice(0, 8) + \"@\" + formatTimestamp(now, decision.settings.timezone);\n\n// Content hashes already in the sheet, so the writer stage can reject repeats.\nconst previousHashes = [];\nfor (let i = decision.layout.dataStartIndex; i < values.length; i++) {\n  const existing = (values[i] || [])[COL.post];\n  if (existing) previousHashes.push(sha256(String(existing).toLowerCase().replace(/\\s+/g, \" \").trim()));\n}\n\nreturn [{ json: {\n  due: true,\n  action: decision.action,\n  reason: decision.reason,\n  rowNumber: row.rowNumber,\n  topic: row.topic,\n  isoDate: row.isoDate,\n  dateRaw: String(row.dateRaw),\n  status: row.status,\n  attempts: row.attempts,\n  idempotencyKey: row.idempotencyKey,\n  runToken: runToken,\n  previousHashes: previousHashes,\n  sheetName: $env.GOOGLE_SHEET_NAME || \"Sheet1\",\n  settings: decision.settings,\n  startedAt: formatTimestamp(now, decision.settings.timezone),\n} }];"
+      },
+      "id": "node-003",
+      "name": "Select Due Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "due-check",
+              "leftValue": "={{ $json.due }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-004",
+      "name": "Is Due?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        260,
+        750
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SHEET_API_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ token: $env.SHEET_API_TOKEN, updates: [{ cell: \"D\" + $json.rowNumber, value: \"Processing\" },{ cell: \"I\" + $json.rowNumber, value: \"\" },{ cell: \"J\" + $json.rowNumber, value: $json.attempts + 1 },{ cell: \"K\" + $json.rowNumber, value: $json.runToken },{ cell: \"L\" + $json.rowNumber, value: $json.idempotencyKey }] }) }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "node-005",
+      "name": "Claim Row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        940
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "node-006",
+      "name": "Settle",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        260,
+        1130
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SHEET_API_URL }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "={{ $env.SHEET_API_TOKEN }}"
+            },
+            {
+              "name": "action",
+              "value": "readRow"
+            },
+            {
+              "name": "row",
+              "value": "={{ $('Select Due Row').first().json.rowNumber }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "node-007",
+      "name": "Re-read Row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        580,
+        180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Google Sheets has no atomic compare-and-swap, so we write our run token\n// and read it back. If another scheduler run claimed the same row in the\n// gap, its token is what survives and we stand down. This narrows the race\n// to the write window rather than eliminating it - see README \"Concurrency\".\nconst ctx = $('Select Due Row').first().json;\nconst rows = $input.first().json.values || [];\nconst row = rows[0] || [];\nconst tokenInSheet = String(row[10] || \"\").trim();\nconst postIdInSheet = String(row[6] || \"\").trim();\n\nif (postIdInSheet) {\n  return [{ json: { owned: false, reason: \"Row already has a LinkedIn Post ID: \" + postIdInSheet, rowNumber: ctx.rowNumber } }];\n}\nif (tokenInSheet !== ctx.runToken) {\n  return [{ json: { owned: false, reason: \"Row claimed by another run (\" + tokenInSheet + \")\", rowNumber: ctx.rowNumber } }];\n}\n\nreturn [{ json: Object.assign({}, ctx, { owned: true }) }];"
+      },
+      "id": "node-008",
+      "name": "Verify Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "owned-check",
+              "leftValue": "={{ $json.owned }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-009",
+      "name": "Claim Won?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        580,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.GEMINI_API_BASE || \"https://generativelanguage.googleapis.com/v1beta\") + \"/models/\" + ($env.GEMINI_RESEARCH_MODEL || \"gemini-2.5-flash\") + \":generateContent\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: \"user\", parts: [{ text: \"You are the research stage of a LinkedIn technical-content automation system.\\n\\nTopic: \" + $json.topic + \"\\nScheduled date: \" + $json.dateRaw + \"\\n\\nResearch the topic using Google Search grounding when available.\\nPrefer primary sources and authoritative technical documentation.\\nDo not invent facts.\\nSeparate evergreen concepts from information that may have changed recently.\\n\\nReturn ONLY valid JSON:\\n{\\\"topic\\\":\\\"...\\\",\\\"summary\\\":\\\"...\\\",\\\"key_points\\\":[\\\"...\\\"],\\\"practical_example\\\":\\\"...\\\",\\\"common_mistakes\\\":[\\\"...\\\"],\\\"current_updates\\\":[\\\"...\\\"],\\\"sources\\\":[{\\\"title\\\":\\\"...\\\",\\\"url\\\":\\\"...\\\",\\\"reason\\\":\\\"...\\\"}]}\\n\\nRules:\\n- Do not copy paragraphs from sources.\\n- Paraphrase.\\n- Do not fabricate URLs.\\n- If no recent update is relevant, return an empty current_updates array.\\n- For technical claims, prefer official documentation.\" }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.3 } }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-010",
+      "name": "Gemini Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        580,
+        750
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AUTO-GENERATED from lib/validate.js. Edit lib/ and re-run the builder.\n/**\r\n * Parsing and validation of Gemini output, plus the gate that decides whether a\r\n * post is allowed to reach LinkedIn.\r\n *\r\n * The bias throughout is to refuse rather than to repair: spec §15 says \"Do not\r\n * publish if validation fails\", and a half-fixed post is worse than no post.\r\n */\r\n\r\n/** LinkedIn rejects commentary longer than this (FIELD_LENGTH_TOO_LONG). */\r\nconst MAX_COMMENTARY = 3000;\r\nconst MIN_POST_LENGTH = 180;\r\n\r\n/**\r\n * Last-resort repair of almost-valid JSON.\r\n *\r\n * Models reliably produce two defects that JSON.parse rejects outright:\r\n * trailing commas, and raw newlines/tabs inside string literals (which happens\r\n * whenever a code sample is embedded in a field). Both are unambiguous to fix\r\n * without guessing at intent, so they are repaired rather than discarding an\r\n * otherwise complete research result. Anything more damaged than this is left\r\n * to fail - a half-understood post is worse than no post.\r\n */\r\nfunction repairJson(text) {\r\n  let out = '';\r\n  let inString = false;\r\n  let escaped = false;\r\n\r\n  for (let i = 0; i < text.length; i++) {\r\n    const ch = text[i];\r\n\r\n    if (escaped) { out += ch; escaped = false; continue; }\r\n    if (ch === '\\\\') { out += ch; escaped = true; continue; }\r\n\r\n    if (ch === '\"') { inString = !inString; out += ch; continue; }\r\n\r\n    if (inString) {\r\n      // Control characters are illegal inside a JSON string; escape them.\r\n      if (ch === '\\n') out += '\\\\n';\r\n      else if (ch === '\\r') out += '\\\\r';\r\n      else if (ch === '\\t') out += '\\\\t';\r\n      else if (ch < ' ') out += '\\\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0');\r\n      else out += ch;\r\n      continue;\r\n    }\r\n\r\n    // Outside a string: drop a comma that is followed only by a closing brace.\r\n    if (ch === ',') {\r\n      let j = i + 1;\r\n      while (j < text.length && /\\s/.test(text[j])) j++;\r\n      if (text[j] === '}' || text[j] === ']') continue;\r\n    }\r\n    out += ch;\r\n  }\r\n  return out;\r\n}\r\n\r\n/** Find the first balanced {...} run in `text` and parse it, or return null. */\r\nfunction scanBalanced(text) {\r\n  const start = text.indexOf('{');\r\n  if (start === -1) return null;\r\n\r\n  let depth = 0;\r\n  let inString = false;\r\n  let escaped = false;\r\n  for (let i = start; i < text.length; i++) {\r\n    const ch = text[i];\r\n    if (escaped) { escaped = false; continue; }\r\n    if (ch === '\\\\') { escaped = true; continue; }\r\n    if (ch === '\"') { inString = !inString; continue; }\r\n    if (inString) continue;\r\n    if (ch === '{') depth++;\r\n    else if (ch === '}') {\r\n      depth--;\r\n      if (depth === 0) {\r\n        const slice = text.slice(start, i + 1);\r\n        try {\r\n          return JSON.parse(slice);\r\n        } catch (_) {\r\n          try {\r\n            return JSON.parse(repairJson(slice));\r\n          } catch (_again) {\r\n            return null;\r\n          }\r\n        }\r\n      }\r\n    }\r\n  }\r\n  return null;\r\n}\r\n\r\n/**\r\n * Pull a JSON object out of a model response.\r\n *\r\n * Models wrap JSON in prose or ```json fences even when told not to. The fence\r\n * is matched anchored at BOTH ends of the response rather than non-greedily:\r\n * research output routinely embeds a markdown code sample inside\r\n * practical_example, and a lazy match would stop at that inner ``` and hand\r\n * back truncated JSON. Each candidate is tried whole first, then brace-scanned,\r\n * and the untouched original is always retried so a failed unwrap cannot lose\r\n * content that was there all along.\r\n */\r\nfunction extractJson(input) {\r\n  if (input === null || input === undefined) return null;\r\n  if (typeof input === 'object') return input;\r\n\r\n  const original = String(input).trim();\r\n  if (!original) return null;\r\n\r\n  const candidates = [];\r\n  const whole = original.match(/^```(?:json)?\\s*\\n?([\\s\\S]*?)\\n?\\s*```$/i);\r\n  if (whole) candidates.push(whole[1].trim());\r\n  candidates.push(original);\r\n\r\n  for (const text of candidates) {\r\n    try {\r\n      return JSON.parse(text);\r\n    } catch (_) { /* try repair, then brace scanning, on this candidate */ }\r\n    try {\r\n      return JSON.parse(repairJson(text));\r\n    } catch (_) { /* fall through */ }\r\n    const scanned = scanBalanced(text);\r\n    if (scanned) return scanned;\r\n  }\r\n  return null;\r\n}\r\n\r\nfunction isHttpUrl(value) {\r\n  if (typeof value !== 'string') return false;\r\n  const trimmed = value.trim();\r\n  if (!/^https?:\\/\\/[^\\s/$.?#][^\\s]*$/i.test(trimmed)) return false;\r\n  // Placeholder URLs are the classic shape of a fabricated citation.\r\n  if (/example\\.(com|org|net)|your-?site|lorem|\\.\\.\\.|\\{|\\}/i.test(trimmed)) return false;\r\n  return true;\r\n}\r\n\r\nfunction asArray(value) {\r\n  if (Array.isArray(value)) return value;\r\n  if (value === null || value === undefined || value === '') return [];\r\n  return [value];\r\n}\r\n\r\n/** Shape-check the research stage. Missing research is survivable; bad JSON is not. */\r\nfunction validateResearch(payload) {\r\n  const errors = [];\r\n  const data = extractJson(payload);\r\n  if (!data) return { ok: false, errors: ['Research response was not valid JSON'], data: null };\r\n  if (data.error) return { ok: false, errors: ['Research returned an error object'], data: null };\r\n\r\n  const summary = typeof data.summary === 'string' ? data.summary.trim() : '';\r\n  if (!summary) errors.push('Research summary is empty');\r\n\r\n  const keyPoints = asArray(data.key_points).filter(function (p) {\r\n    return typeof p === 'string' && p.trim();\r\n  });\r\n  if (!keyPoints.length) errors.push('Research returned no key_points');\r\n\r\n  const sources = asArray(data.sources)\r\n    .filter(function (s) { return s && isHttpUrl(s.url); })\r\n    .map(function (s) {\r\n      return {\r\n        title: String(s.title || '').trim(),\r\n        url: String(s.url).trim(),\r\n        reason: String(s.reason || '').trim(),\r\n      };\r\n    });\r\n\r\n  return {\r\n    ok: errors.length === 0,\r\n    errors: errors,\r\n    data: {\r\n      topic: String(data.topic || '').trim(),\r\n      summary: summary,\r\n      key_points: keyPoints,\r\n      practical_example: String(data.practical_example || '').trim(),\r\n      common_mistakes: asArray(data.common_mistakes).filter(Boolean),\r\n      current_updates: asArray(data.current_updates).filter(Boolean),\r\n      sources: sources,\r\n    },\r\n  };\r\n}\r\n\r\n/** Significant words of a topic, used to check the post actually addresses it. */\r\nfunction topicTokens(topic) {\r\n  const stop = new Set(['on', 'the', 'a', 'an', 'of', 'in', 'for', 'and', 'to', 'with', 'using']);\r\n  return String(topic || '')\r\n    .toLowerCase()\r\n    .split(/[^a-z0-9+#.]+/)\r\n    .filter(function (w) { return w.length > 2 && !stop.has(w); });\r\n}\r\n\r\n/**\r\n * Validate and normalize the writer stage.\r\n *\r\n * `opts.researchUrls` is the set of URLs the research stage actually returned;\r\n * any source_url outside it is dropped as unverifiable rather than published.\r\n * `opts.previousHashes` carries content hashes already in the sheet so repeated\r\n * output is rejected (spec §8).\r\n */\r\nfunction validatePost(payload, topic, opts) {\r\n  const options = opts || {};\r\n  const errors = [];\r\n  const warnings = [];\r\n\r\n  const data = extractJson(payload);\r\n  if (!data) return { ok: false, errors: ['Writer response was not valid JSON'], warnings: warnings, post: null };\r\n  if (data.error) return { ok: false, errors: ['Writer returned an error object'], warnings: warnings, post: null };\r\n\r\n  let body = typeof data.post === 'string' ? data.post.trim() : '';\r\n  if (!body) errors.push('post field is empty');\r\n\r\n  const hashtags = asArray(data.hashtags)\r\n    .map(function (h) { return String(h).trim(); })\r\n    .filter(Boolean)\r\n    .map(function (h) { return h.startsWith('#') ? h : '#' + h; })\r\n    .filter(function (h) { return /^#[A-Za-z0-9_]+$/.test(h); });\r\n\r\n  // Keep hashtags out of the body so appending them cannot duplicate them.\r\n  const bodyLower = body.toLowerCase();\r\n  const tailTags = hashtags.filter(function (h) { return bodyLower.includes(h.toLowerCase()); });\r\n  const appendTags = hashtags.filter(function (h) { return !tailTags.includes(h); });\r\n\r\n  let commentary = appendTags.length ? body + '\\n\\n' + appendTags.join(' ') : body;\r\n  commentary = commentary.replace(/\\r\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();\r\n\r\n  if (commentary.length > MAX_COMMENTARY) {\r\n    errors.push('Post is ' + commentary.length + ' characters; LinkedIn allows ' + MAX_COMMENTARY);\r\n  }\r\n  if (body && body.length < MIN_POST_LENGTH) {\r\n    errors.push('Post is only ' + body.length + ' characters, which reads as a truncated generation');\r\n  }\r\n  if (!hashtags.length) warnings.push('No usable hashtags were returned');\r\n\r\n  // The post must plausibly be about the topic that was scheduled. This checks\r\n  // the body, not the commentary: a \"#DSA\" hashtag tacked onto an essay about\r\n  // something else would otherwise satisfy the check.\r\n  const tokens = topicTokens(topic);\r\n  if (tokens.length) {\r\n    const hit = tokens.some(function (t) { return body.toLowerCase().includes(t); });\r\n    if (!hit) errors.push('Post does not mention any significant word from the topic \"' + topic + '\"');\r\n  }\r\n\r\n  // Only URLs corroborated by the research stage survive.\r\n  const allowed = new Set((options.researchUrls || []).map(function (u) { return String(u).trim(); }));\r\n  const claimed = asArray(data.source_urls).map(function (u) { return String(u).trim(); });\r\n  const sourceUrls = claimed.filter(function (u) { return isHttpUrl(u); })\r\n    .filter(function (u) { return allowed.size === 0 ? true : allowed.has(u); });\r\n  if (claimed.length > sourceUrls.length) {\r\n    warnings.push('Dropped ' + (claimed.length - sourceUrls.length) + ' source URL(s) not backed by research');\r\n  }\r\n\r\n  // Any URL pasted into the body itself must be corroborated too, or the post\r\n  // would publish a citation nobody verified.\r\n  const inBody = commentary.match(/https?:\\/\\/[^\\s)\\]]+/gi) || [];\r\n  for (const url of inBody) {\r\n    const clean = url.replace(/[.,;:]+$/, '');\r\n    if (allowed.size && !allowed.has(clean)) {\r\n      errors.push('Post body cites an unverified URL: ' + clean);\r\n    }\r\n  }\r\n\r\n  const hash = options.sha256 ? options.sha256(commentary.toLowerCase().replace(/\\s+/g, ' ').trim()) : '';\r\n  if (hash && Array.isArray(options.previousHashes) && options.previousHashes.includes(hash)) {\r\n    errors.push('Identical post content was already generated for an earlier row');\r\n  }\r\n\r\n  return {\r\n    ok: errors.length === 0,\r\n    errors: errors,\r\n    warnings: warnings,\r\n    post: {\r\n      hook: String(data.hook || '').trim(),\r\n      body: body,\r\n      commentary: commentary,\r\n      hashtags: hashtags,\r\n      imageConcept: String(data.image_concept || '').trim(),\r\n      sourceUrls: sourceUrls,\r\n      contentHash: hash,\r\n      length: commentary.length,\r\n    },\r\n  };\r\n}\n\nconst ctx = $('Verify Claim').first().json;\nconst response = $input.first().json;\nconst parts = response?.candidates?.[0]?.content?.parts || [];\nconst text = parts.map(p => p.text || \"\").join(\"\\n\").trim();\n\nconst result = validateResearch(text);\nif (!result.ok) {\n  return [{ json: Object.assign({}, ctx, { stage: \"research\", failed: true, errors: result.errors, raw: text.slice(0, 800) }) }];\n}\n\n// Grounding metadata carries the URLs Google actually consulted; union them\n// with the model-reported sources so the writer stage can be held to both.\nconst grounded = (response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [])\n  .map(c => c?.web?.uri).filter(Boolean);\nconst researchUrls = Array.from(new Set(result.data.sources.map(s => s.url).concat(grounded)));\n\nreturn [{ json: Object.assign({}, ctx, {\n  stage: \"research\", failed: false,\n  research: result.data,\n  researchUrls: researchUrls,\n  researchJson: JSON.stringify(result.data),\n}) }];"
+      },
+      "id": "node-011",
+      "name": "Validate Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        940
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.GEMINI_API_BASE || \"https://generativelanguage.googleapis.com/v1beta\") + \"/models/\" + ($env.GEMINI_MODEL || \"gemini-2.5-flash\") + \":generateContent\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: \"user\", parts: [{ text: \"You are a professional LinkedIn technical-content writer.\\n\\nTopic:\\n\" + $json.topic + \"\\n\\nResearch:\\n\" + $json.researchJson + \"\\n\\nCreate an original LinkedIn post for a software developer audience.\\n\\nStyle:\\n- Clear and human.\\n- Practical, not corporate.\\n- Strong opening hook.\\n- Teach one useful concept.\\n- Include a small example where appropriate.\\n- Avoid fake personal experiences.\\n- Avoid unsupported statistics.\\n- Avoid clickbait.\\n- Avoid engagement bait unless natural.\\n- Use short paragraphs.\\n- Use code blocks only when they materially help.\\n- Add 3-6 relevant hashtags.\\n- Do not claim the author personally built or tested something unless given as fact.\\n\\nHard constraints enforced downstream:\\n- The post body must be between 180 and 2900 characters before hashtags.\\n- Do not put any URL in post unless that exact URL appears in the research sources.\\n\\nReturn ONLY JSON with keys: hook, post, hashtags, image_concept, source_urls.\" }] }], generationConfig: { temperature: 0.8, responseMimeType: \"application/json\" } }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-012",
+      "name": "Gemini Writer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        580,
+        1130
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AUTO-GENERATED from lib/validate.js. Edit lib/ and re-run the builder.\nconst crypto = require('crypto');\nfunction sha256(value) { return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex'); }\n\n/**\r\n * Parsing and validation of Gemini output, plus the gate that decides whether a\r\n * post is allowed to reach LinkedIn.\r\n *\r\n * The bias throughout is to refuse rather than to repair: spec §15 says \"Do not\r\n * publish if validation fails\", and a half-fixed post is worse than no post.\r\n */\r\n\r\n/** LinkedIn rejects commentary longer than this (FIELD_LENGTH_TOO_LONG). */\r\nconst MAX_COMMENTARY = 3000;\r\nconst MIN_POST_LENGTH = 180;\r\n\r\n/**\r\n * Last-resort repair of almost-valid JSON.\r\n *\r\n * Models reliably produce two defects that JSON.parse rejects outright:\r\n * trailing commas, and raw newlines/tabs inside string literals (which happens\r\n * whenever a code sample is embedded in a field). Both are unambiguous to fix\r\n * without guessing at intent, so they are repaired rather than discarding an\r\n * otherwise complete research result. Anything more damaged than this is left\r\n * to fail - a half-understood post is worse than no post.\r\n */\r\nfunction repairJson(text) {\r\n  let out = '';\r\n  let inString = false;\r\n  let escaped = false;\r\n\r\n  for (let i = 0; i < text.length; i++) {\r\n    const ch = text[i];\r\n\r\n    if (escaped) { out += ch; escaped = false; continue; }\r\n    if (ch === '\\\\') { out += ch; escaped = true; continue; }\r\n\r\n    if (ch === '\"') { inString = !inString; out += ch; continue; }\r\n\r\n    if (inString) {\r\n      // Control characters are illegal inside a JSON string; escape them.\r\n      if (ch === '\\n') out += '\\\\n';\r\n      else if (ch === '\\r') out += '\\\\r';\r\n      else if (ch === '\\t') out += '\\\\t';\r\n      else if (ch < ' ') out += '\\\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0');\r\n      else out += ch;\r\n      continue;\r\n    }\r\n\r\n    // Outside a string: drop a comma that is followed only by a closing brace.\r\n    if (ch === ',') {\r\n      let j = i + 1;\r\n      while (j < text.length && /\\s/.test(text[j])) j++;\r\n      if (text[j] === '}' || text[j] === ']') continue;\r\n    }\r\n    out += ch;\r\n  }\r\n  return out;\r\n}\r\n\r\n/** Find the first balanced {...} run in `text` and parse it, or return null. */\r\nfunction scanBalanced(text) {\r\n  const start = text.indexOf('{');\r\n  if (start === -1) return null;\r\n\r\n  let depth = 0;\r\n  let inString = false;\r\n  let escaped = false;\r\n  for (let i = start; i < text.length; i++) {\r\n    const ch = text[i];\r\n    if (escaped) { escaped = false; continue; }\r\n    if (ch === '\\\\') { escaped = true; continue; }\r\n    if (ch === '\"') { inString = !inString; continue; }\r\n    if (inString) continue;\r\n    if (ch === '{') depth++;\r\n    else if (ch === '}') {\r\n      depth--;\r\n      if (depth === 0) {\r\n        const slice = text.slice(start, i + 1);\r\n        try {\r\n          return JSON.parse(slice);\r\n        } catch (_) {\r\n          try {\r\n            return JSON.parse(repairJson(slice));\r\n          } catch (_again) {\r\n            return null;\r\n          }\r\n        }\r\n      }\r\n    }\r\n  }\r\n  return null;\r\n}\r\n\r\n/**\r\n * Pull a JSON object out of a model response.\r\n *\r\n * Models wrap JSON in prose or ```json fences even when told not to. The fence\r\n * is matched anchored at BOTH ends of the response rather than non-greedily:\r\n * research output routinely embeds a markdown code sample inside\r\n * practical_example, and a lazy match would stop at that inner ``` and hand\r\n * back truncated JSON. Each candidate is tried whole first, then brace-scanned,\r\n * and the untouched original is always retried so a failed unwrap cannot lose\r\n * content that was there all along.\r\n */\r\nfunction extractJson(input) {\r\n  if (input === null || input === undefined) return null;\r\n  if (typeof input === 'object') return input;\r\n\r\n  const original = String(input).trim();\r\n  if (!original) return null;\r\n\r\n  const candidates = [];\r\n  const whole = original.match(/^```(?:json)?\\s*\\n?([\\s\\S]*?)\\n?\\s*```$/i);\r\n  if (whole) candidates.push(whole[1].trim());\r\n  candidates.push(original);\r\n\r\n  for (const text of candidates) {\r\n    try {\r\n      return JSON.parse(text);\r\n    } catch (_) { /* try repair, then brace scanning, on this candidate */ }\r\n    try {\r\n      return JSON.parse(repairJson(text));\r\n    } catch (_) { /* fall through */ }\r\n    const scanned = scanBalanced(text);\r\n    if (scanned) return scanned;\r\n  }\r\n  return null;\r\n}\r\n\r\nfunction isHttpUrl(value) {\r\n  if (typeof value !== 'string') return false;\r\n  const trimmed = value.trim();\r\n  if (!/^https?:\\/\\/[^\\s/$.?#][^\\s]*$/i.test(trimmed)) return false;\r\n  // Placeholder URLs are the classic shape of a fabricated citation.\r\n  if (/example\\.(com|org|net)|your-?site|lorem|\\.\\.\\.|\\{|\\}/i.test(trimmed)) return false;\r\n  return true;\r\n}\r\n\r\nfunction asArray(value) {\r\n  if (Array.isArray(value)) return value;\r\n  if (value === null || value === undefined || value === '') return [];\r\n  return [value];\r\n}\r\n\r\n/** Shape-check the research stage. Missing research is survivable; bad JSON is not. */\r\nfunction validateResearch(payload) {\r\n  const errors = [];\r\n  const data = extractJson(payload);\r\n  if (!data) return { ok: false, errors: ['Research response was not valid JSON'], data: null };\r\n  if (data.error) return { ok: false, errors: ['Research returned an error object'], data: null };\r\n\r\n  const summary = typeof data.summary === 'string' ? data.summary.trim() : '';\r\n  if (!summary) errors.push('Research summary is empty');\r\n\r\n  const keyPoints = asArray(data.key_points).filter(function (p) {\r\n    return typeof p === 'string' && p.trim();\r\n  });\r\n  if (!keyPoints.length) errors.push('Research returned no key_points');\r\n\r\n  const sources = asArray(data.sources)\r\n    .filter(function (s) { return s && isHttpUrl(s.url); })\r\n    .map(function (s) {\r\n      return {\r\n        title: String(s.title || '').trim(),\r\n        url: String(s.url).trim(),\r\n        reason: String(s.reason || '').trim(),\r\n      };\r\n    });\r\n\r\n  return {\r\n    ok: errors.length === 0,\r\n    errors: errors,\r\n    data: {\r\n      topic: String(data.topic || '').trim(),\r\n      summary: summary,\r\n      key_points: keyPoints,\r\n      practical_example: String(data.practical_example || '').trim(),\r\n      common_mistakes: asArray(data.common_mistakes).filter(Boolean),\r\n      current_updates: asArray(data.current_updates).filter(Boolean),\r\n      sources: sources,\r\n    },\r\n  };\r\n}\r\n\r\n/** Significant words of a topic, used to check the post actually addresses it. */\r\nfunction topicTokens(topic) {\r\n  const stop = new Set(['on', 'the', 'a', 'an', 'of', 'in', 'for', 'and', 'to', 'with', 'using']);\r\n  return String(topic || '')\r\n    .toLowerCase()\r\n    .split(/[^a-z0-9+#.]+/)\r\n    .filter(function (w) { return w.length > 2 && !stop.has(w); });\r\n}\r\n\r\n/**\r\n * Validate and normalize the writer stage.\r\n *\r\n * `opts.researchUrls` is the set of URLs the research stage actually returned;\r\n * any source_url outside it is dropped as unverifiable rather than published.\r\n * `opts.previousHashes` carries content hashes already in the sheet so repeated\r\n * output is rejected (spec §8).\r\n */\r\nfunction validatePost(payload, topic, opts) {\r\n  const options = opts || {};\r\n  const errors = [];\r\n  const warnings = [];\r\n\r\n  const data = extractJson(payload);\r\n  if (!data) return { ok: false, errors: ['Writer response was not valid JSON'], warnings: warnings, post: null };\r\n  if (data.error) return { ok: false, errors: ['Writer returned an error object'], warnings: warnings, post: null };\r\n\r\n  let body = typeof data.post === 'string' ? data.post.trim() : '';\r\n  if (!body) errors.push('post field is empty');\r\n\r\n  const hashtags = asArray(data.hashtags)\r\n    .map(function (h) { return String(h).trim(); })\r\n    .filter(Boolean)\r\n    .map(function (h) { return h.startsWith('#') ? h : '#' + h; })\r\n    .filter(function (h) { return /^#[A-Za-z0-9_]+$/.test(h); });\r\n\r\n  // Keep hashtags out of the body so appending them cannot duplicate them.\r\n  const bodyLower = body.toLowerCase();\r\n  const tailTags = hashtags.filter(function (h) { return bodyLower.includes(h.toLowerCase()); });\r\n  const appendTags = hashtags.filter(function (h) { return !tailTags.includes(h); });\r\n\r\n  let commentary = appendTags.length ? body + '\\n\\n' + appendTags.join(' ') : body;\r\n  commentary = commentary.replace(/\\r\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();\r\n\r\n  if (commentary.length > MAX_COMMENTARY) {\r\n    errors.push('Post is ' + commentary.length + ' characters; LinkedIn allows ' + MAX_COMMENTARY);\r\n  }\r\n  if (body && body.length < MIN_POST_LENGTH) {\r\n    errors.push('Post is only ' + body.length + ' characters, which reads as a truncated generation');\r\n  }\r\n  if (!hashtags.length) warnings.push('No usable hashtags were returned');\r\n\r\n  // The post must plausibly be about the topic that was scheduled. This checks\r\n  // the body, not the commentary: a \"#DSA\" hashtag tacked onto an essay about\r\n  // something else would otherwise satisfy the check.\r\n  const tokens = topicTokens(topic);\r\n  if (tokens.length) {\r\n    const hit = tokens.some(function (t) { return body.toLowerCase().includes(t); });\r\n    if (!hit) errors.push('Post does not mention any significant word from the topic \"' + topic + '\"');\r\n  }\r\n\r\n  // Only URLs corroborated by the research stage survive.\r\n  const allowed = new Set((options.researchUrls || []).map(function (u) { return String(u).trim(); }));\r\n  const claimed = asArray(data.source_urls).map(function (u) { return String(u).trim(); });\r\n  const sourceUrls = claimed.filter(function (u) { return isHttpUrl(u); })\r\n    .filter(function (u) { return allowed.size === 0 ? true : allowed.has(u); });\r\n  if (claimed.length > sourceUrls.length) {\r\n    warnings.push('Dropped ' + (claimed.length - sourceUrls.length) + ' source URL(s) not backed by research');\r\n  }\r\n\r\n  // Any URL pasted into the body itself must be corroborated too, or the post\r\n  // would publish a citation nobody verified.\r\n  const inBody = commentary.match(/https?:\\/\\/[^\\s)\\]]+/gi) || [];\r\n  for (const url of inBody) {\r\n    const clean = url.replace(/[.,;:]+$/, '');\r\n    if (allowed.size && !allowed.has(clean)) {\r\n      errors.push('Post body cites an unverified URL: ' + clean);\r\n    }\r\n  }\r\n\r\n  const hash = options.sha256 ? options.sha256(commentary.toLowerCase().replace(/\\s+/g, ' ').trim()) : '';\r\n  if (hash && Array.isArray(options.previousHashes) && options.previousHashes.includes(hash)) {\r\n    errors.push('Identical post content was already generated for an earlier row');\r\n  }\r\n\r\n  return {\r\n    ok: errors.length === 0,\r\n    errors: errors,\r\n    warnings: warnings,\r\n    post: {\r\n      hook: String(data.hook || '').trim(),\r\n      body: body,\r\n      commentary: commentary,\r\n      hashtags: hashtags,\r\n      imageConcept: String(data.image_concept || '').trim(),\r\n      sourceUrls: sourceUrls,\r\n      contentHash: hash,\r\n      length: commentary.length,\r\n    },\r\n  };\r\n}\n\nconst ctx = $('Validate Research').first().json;\nconst response = $input.first().json;\nconst parts = response?.candidates?.[0]?.content?.parts || [];\nconst text = parts.map(p => p.text || \"\").join(\"\\n\").trim();\n\nconst result = validatePost(text, ctx.topic, {\n  researchUrls: ctx.researchUrls || [],\n  previousHashes: ctx.previousHashes || [],\n  sha256: sha256,\n});\n\nif (!result.ok) {\n  return [{ json: Object.assign({}, ctx, { stage: \"writer\", failed: true, errors: result.errors, raw: text.slice(0, 800) }) }];\n}\n\nreturn [{ json: Object.assign({}, ctx, {\n  stage: \"writer\", failed: false,\n  warnings: result.warnings,\n  post: result.post,\n  commentary: result.post.commentary,\n}) }];"
+      },
+      "id": "node-013",
+      "name": "Validate Post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.failed }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-014",
+      "name": "Post Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.IMAGE_SERVICE_URL || \"http://host.docker.internal:8411\") + \"/generate\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Image-Token",
+              "value": "={{ $env.IMAGE_SERVICE_TOKEN || \"\" }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $json.topic, concept: $json.post.imageConcept, points: ($json.research?.key_points || []).slice(0, 3), label: \"Developer Notes\", footer: \"\" + $json.dateRaw, format: \"square\", seed: $json.idempotencyKey, prefer: ($env.COMFYUI_ENABLED === \"true\" ? \"comfy\" : \"poster\") }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 240000
+        }
+      },
+      "id": "node-015",
+      "name": "Generate Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        560
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 4000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.linkedin.com/v2/userinfo",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "linkedInOAuth2Api"
+      },
+      "id": "node-016",
+      "name": "LinkedIn Me",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        750
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/rest/images?action=initializeUpload",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "LinkedIn-Version",
+              "value": "={{ $env.LINKEDIN_API_VERSION || \"202609\" }}"
+            },
+            {
+              "name": "X-Restli-Protocol-Version",
+              "value": "2.0.0"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ initializeUploadRequest: { owner: \"urn:li:person:\" + $json.sub } }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "linkedInOAuth2Api"
+      },
+      "id": "node-017",
+      "name": "Init Image Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        940
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.value.uploadUrl }}",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 120000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "linkedInOAuth2Api"
+      },
+      "id": "node-018",
+      "name": "Upload Image Binary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        1130
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 4000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/rest/posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "LinkedIn-Version",
+              "value": "={{ $env.LINKEDIN_API_VERSION || \"202609\" }}"
+            },
+            {
+              "name": "X-Restli-Protocol-Version",
+              "value": "2.0.0"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ author: \"urn:li:person:\" + $('LinkedIn Me').first().json.sub, commentary: $('Validate Post').first().json.post.commentary, visibility: \"PUBLIC\", distribution: { feedDistribution: \"MAIN_FEED\", targetEntities: [], thirdPartyDistributionChannels: [] }, content: { media: { id: $('Init Image Upload').first().json.value.image, altText: ($('Validate Post').first().json.post.imageConcept || $('Validate Post').first().json.topic).slice(0, 300) } }, lifecycleState: \"PUBLISHED\", isReshareDisabledByAuthor: false }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "linkedInOAuth2Api"
+      },
+      "id": "node-019",
+      "name": "Create LinkedIn Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        180
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// A 2xx with an x-restli-id is the ONLY proof of publication (spec §10).\nconst ctx = $('Validate Post').first().json;\nconst response = $input.first().json;\nconst status = response.statusCode ?? 0;\nconst headers = response.headers || {};\nconst postId = headers[\"x-restli-id\"] || headers[\"X-RestLi-Id\"] || (response.body && response.body.id) || \"\";\n\nif (status >= 200 && status < 300 && postId) {\n  return [{ json: Object.assign({}, ctx, { published: true, linkedinPostId: postId, statusCode: status }) }];\n}\n\nconst detail = typeof response.body === \"string\" ? response.body.slice(0, 400) : JSON.stringify(response.body || {}).slice(0, 400);\nreturn [{ json: Object.assign({}, ctx, {\n  published: false,\n  statusCode: status,\n  // Deliberately NOT retried here. If LinkedIn timed out, the post may exist;\n  // the row stays un-posted and the next run refuses it because Status is not Pending.\n  errors: [\"LinkedIn create returned HTTP \" + status + \" without a post ID: \" + detail],\n  needsManualCheck: status === 0 || status >= 500,\n}) }];"
+      },
+      "id": "node-020",
+      "name": "Confirm Publication",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "published-check",
+              "leftValue": "={{ $json.published }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-021",
+      "name": "Published?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SHEET_API_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ token: $env.SHEET_API_TOKEN, updates: [{ cell: \"D\" + $json.rowNumber, value: \"Posted\" },{ cell: \"E\" + $json.rowNumber, value: $json.post.commentary },{ cell: \"F\" + $json.rowNumber, value: ($('Generate Image').first().binary?.data?.fileName || $json.post.contentHash.slice(0, 16)) },{ cell: \"G\" + $json.rowNumber, value: $json.linkedinPostId },{ cell: \"H\" + $json.rowNumber, value: $now.setZone($json.settings.timezone).toFormat(\"dd/MM/yyyy HH:mm:ss\") },{ cell: \"I\" + $json.rowNumber, value: \"\" },{ cell: \"K\" + $json.rowNumber, value: \"\" }] }) }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "node-022",
+      "name": "Write Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        750
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Single funnel for every failure branch, so one place decides whether the\n// row goes back to Pending for another attempt or is parked as Failed.\nconst ctx = $('Select Due Row').first().json;\nconst item = $input.first().json;\n\nconst errors = item.errors || [item.reason || item.message || \"Unknown failure\"];\nconst message = (Array.isArray(errors) ? errors.join(\"; \") : String(errors)).slice(0, 480);\nconst attempts = (ctx.attempts || 0) + 1;\nconst maxAttempts = ctx.settings?.maxAttempts || 3;\n\n// A publish attempt whose outcome is unknown must never be retried\n// automatically - it could duplicate a post that actually went out.\nconst terminal = item.needsManualCheck === true || attempts >= maxAttempts;\n\nreturn [{ json: {\n  sheetName: ctx.sheetName,\n  rowNumber: ctx.rowNumber,\n  status: terminal ? \"Failed\" : \"Pending\",\n  attempts: attempts,\n  errorMessage: (item.needsManualCheck ? \"MANUAL CHECK NEEDED - verify on LinkedIn before retrying. \" : \"\") + message,\n  timezone: ctx.settings?.timezone || \"Asia/Kolkata\",\n} }];"
+      },
+      "id": "node-023",
+      "name": "Build Failure Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        940
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SHEET_API_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ token: $env.SHEET_API_TOKEN, updates: [{ cell: \"D\" + $json.rowNumber, value: $json.status },{ cell: \"I\" + $json.rowNumber, value: $json.errorMessage },{ cell: \"J\" + $json.rowNumber, value: $json.attempts },{ cell: \"K\" + $json.rowNumber, value: \"\" }] }) }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "node-024",
+      "name": "Write Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        1130
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {},
+      "id": "node-025",
+      "name": "No Op",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        180
+      ]
+    }
+  ],
+  "connections": {
+    "Every Minute": {
+      "main": [
+        [
+          {
+            "node": "Read Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sheet": {
+      "main": [
+        [
+          {
+            "node": "Select Due Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Due Row": {
+      "main": [
+        [
+          {
+            "node": "Is Due?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Due?": {
+      "main": [
+        [
+          {
+            "node": "Claim Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Op",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Row": {
+      "main": [
+        [
+          {
+            "node": "Settle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settle": {
+      "main": [
+        [
+          {
+            "node": "Re-read Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-read Row": {
+      "main": [
+        [
+          {
+            "node": "Verify Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Claim": {
+      "main": [
+        [
+          {
+            "node": "Claim Won?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Won?": {
+      "main": [
+        [
+          {
+            "node": "Gemini Research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Op",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Research": {
+      "main": [
+        [
+          {
+            "node": "Validate Research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Research": {
+      "main": [
+        [
+          {
+            "node": "Gemini Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Writer": {
+      "main": [
+        [
+          {
+            "node": "Validate Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Post": {
+      "main": [
+        [
+          {
+            "node": "Post Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Valid?": {
+      "main": [
+        [
+          {
+            "node": "Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn Me",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Me": {
+      "main": [
+        [
+          {
+            "node": "Init Image Upload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Image Upload": {
+      "main": [
+        [
+          {
+            "node": "Upload Image Binary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Image Binary": {
+      "main": [
+        [
+          {
+            "node": "Create LinkedIn Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create LinkedIn Post": {
+      "main": [
+        [
+          {
+            "node": "Confirm Publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Publication": {
+      "main": [
+        [
+          {
+            "node": "Published?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Published?": {
+      "main": [
+        [
+          {
+            "node": "Write Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Failure Record": {
+      "main": [
+        [
+          {
+            "node": "Write Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 900
+  },
+  "pinData": {},
+  "meta": {
+    "generatedBy": "scripts/build-workflow.js",
+    "generatedAt": "2026-10-03T07:32:00.416Z",
+    "note": "Generated file. Edit lib/ and re-run the builder rather than editing this JSON."
+  }
+}
