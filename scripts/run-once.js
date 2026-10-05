@@ -240,7 +240,9 @@ async function main() {
     const writerPrompt = prompt('writer_prompt.txt', { TOPIC: row.topic, RESEARCH_JSON: JSON.stringify(research.data) });
     const r2 = await generate(env.GEMINI_MODEL || 'gemini-2.5-flash', {
       contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],
-      generationConfig: { temperature: 0.8, responseMimeType: 'application/json' },
+      // Higher than the research call: sentence rhythm is what makes a post read
+      // as human, and low temperature flattens it.
+      generationConfig: { temperature: 0.95, topP: 0.95, responseMimeType: 'application/json' },
     }, writerPrompt);
 
     // Previously generated posts, so repeated content is rejected.
@@ -268,6 +270,7 @@ async function main() {
       body: JSON.stringify({
         topic: row.topic,
         concept: post.post.imageConcept,
+        visual: post.post.visual,
         points: research.data.key_points.slice(0, 3),
         label: 'Developer Notes',
         footer: String(row.dateRaw),

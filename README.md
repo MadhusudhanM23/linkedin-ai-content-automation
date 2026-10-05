@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/acceptance%20tests-64-success.svg)](tests/acceptance.test.js)
+[![Tests](https://img.shields.io/badge/acceptance%20tests-76-success.svg)](tests/acceptance.test.js)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#requirements)
 
 Write a topic in a Google Sheet. At the time you set, it researches that topic,
@@ -80,6 +80,7 @@ and fully tested offline, so swapping the publish step in
 - [Commands](#commands)
 - [How duplicates are prevented](#how-duplicates-are-prevented)
 - [What gets rejected](#what-gets-rejected)
+- [How the writing stays readable](#how-the-writing-stays-readable)
 - [Repository layout](#repository-layout)
 - [Cost](#cost)
 - [Troubleshooting](#troubleshooting)
@@ -104,10 +105,13 @@ run:
 4. **Researches** with Gemini using Google Search grounding — it fetches real
    pages, typically 20-30.
 5. **Writes** the post with Gemini, in a second call that can only use what the
-   research found.
-6. **Validates** — length, topic relevance, no invented URLs, no repeats.
-   Rejects rather than repairs.
-7. **Renders an image** locally: ~200 ms, no GPU, no API call.
+   research found. The writer prompt picks one of five shapes rather than
+   filling in a fixed template, and the validator enforces a ban-list of AI
+   tells — see [How the writing stays readable](#how-the-writing-stays-readable).
+6. **Validates** — length, topic relevance, no invented URLs, no repeats, and
+   no machine-writing tells. Rejects rather than repairs.
+7. **Renders an image** locally: ~200 ms, no GPU, no API call. The drawing is a
+   diagram of the actual subject, picked from the topic.
 8. **Publishes** — upload image, create post, read the `x-restli-id` header.
 9. **Records** `Posted`, the text, image filename, Post ID and timestamp.
 
@@ -142,7 +146,7 @@ npm install
 cd local-image && npm install && cd ..
 
 # 2. Verify everything
-npm test          # expect: 64 passed, 0 failed
+npm test          # expect: 76 passed, 0 failed
 npm run doctor    # checks config, image service, Gemini, LinkedIn
 npm run sheet     # confirms sheet read AND write
 
@@ -342,7 +346,7 @@ days stay missed, by design.
 ## Commands
 
 ```bash
-npm test              # 64 acceptance tests, no network needed
+npm test              # 76 acceptance tests, no network needed
 npm run doctor        # preflight: config, image service, Gemini, LinkedIn
 npm run sheet         # verify sheet read + write
 npm run run           # check what it would do, publish nothing
@@ -395,6 +399,10 @@ The validator refuses rather than repairs: do not publish if validation fails.
 | Mentions the topic | Catches the model wandering off. Checked against the **body**, so a `#DSA` hashtag cannot fake it |
 | Every URL appears in the research | **Stops invented citations** — the most important gate |
 | Not identical to an earlier post | Stops repeats |
+| No banned filler | "game-changer", "let's dive in", "In conclusion", "Thoughts?" and ~45 more mark a post as machine-written |
+| No rhetorical-question opener | The single most recognisable AI tell |
+| No emoji bullets or emoji rows | Same reason |
+| No "it's not just X, it's Y" | A construction almost nothing human writes twice |
 
 **Markdown is converted before publishing.** LinkedIn renders none — `**bold**`
 would publish with the asterisks visible. `toLinkedInText()` strips the syntax
@@ -402,6 +410,39 @@ and rebuilds structure from spacing, `•` bullets and indentation.
 
 **When Claude is used instead of Gemini**, research has no search grounding, so
 nothing is verified — `strictUrls` then blocks *every* URL from the post.
+
+---
+
+## How the writing stays readable
+
+Most automated LinkedIn posts are recognisable within a line, and the usual
+cause is the generator itself: one fixed template, filled in the same way every
+day, in the register of a press release.
+
+Three things push against that.
+
+**The prompt offers shapes, not a template.** The writer picks one of five —
+a correction of a common belief, a walkthrough of one concrete scenario, a
+comparison of two approaches, a surprising number from the research, or a
+failure and what prevents it. Whichever it picks, the post needs exactly one
+concrete anchor: a short snippet, a worked number, or a two-line comparison.
+
+**Sentence rhythm is the strongest signal.** Machine prose runs at a steady
+fifteen words a sentence. The prompt asks for deliberate variation — a long
+sentence next to a three-word one — plus contractions, plain words ("use", not
+"utilize"), and honest hedging where hedging is accurate. The writer call runs
+at temperature 0.95 for the same reason; low temperature flattens rhythm.
+
+**The validator enforces it.** A prompt is a request, not a guarantee, so the
+worst tells are checked in `lib/validate.js` and the post is rejected if they
+appear. Around 45 banned phrases, plus rhetorical-question openers, emoji
+bullets and the "it's not just X, it's Y" construction. The ban-list is
+deliberately made of multi-word phrases: single words like "robust" and
+"leverage" have honest engineering uses, so those only raise a warning in
+`run.log`.
+
+A rejected post is not repaired and republished. The row is retried on the next
+run, up to `MAX_ATTEMPTS`.
 
 ---
 
@@ -424,11 +465,13 @@ scripts/
 local-image/
   server.js               HTTP image service on :8411
   lib/poster.js           deterministic SVG poster generator
+  lib/diagrams.js         22 topic-aware diagrams + the keyword table
+  lib/svgutil.js          text measuring and wrapping, shared by both
   lib/render.js           SVG to PNG via resvg
   lib/comfy.js            optional ComfyUI client
 apps-script/Code.gs       the sheet's read/write endpoint
 prompts/                  research, writer and image prompts
-tests/acceptance.test.js  64 tests, no network required
+tests/acceptance.test.js  76 tests, no network required
 workflows/                n8n export — optional, not used by default
 ```
 
@@ -440,6 +483,22 @@ Google, LinkedIn or a clock.
 Posters are generated locally and deterministically: theme, accent and layout
 all derive from a hash of the topic, so the same topic always yields the same
 image. `npm run preview` renders samples.
+
+**The lower half is a real diagram of the subject**, not decoration. A keyword
+table maps the topic to one of 22 drawings — indexed array cells, linked-list
+nodes ending in `null`, a request and response, Big-O curves on shared axes, a
+hash bucket with a collision chained off it — each with a one-line caption
+stating what it shows. The writer can also name the diagram directly in its
+`visual` field; detection is the fallback.
+
+Detection cascades from the topic outward, widest signal last. The topic is the
+subject of the post, so it has to dominate: a post titled "Why linked lists are
+slower" whose concept line happens to mention "the CPU cache" must still draw a
+linked list. Anything unrecognised gets a neutral three-stage flow diagram.
+
+A bounds test renders every diagram at two sizes and asserts every rectangle,
+circle, line and arrowhead lands inside its box, so a drawing cannot quietly
+run off the edge of the image.
 
 **Why not AI image generation?** Gemini's image models have no free tier — paid
 on every tier. A GPU-based local model (ComfyUI) is wired up and enabled with
@@ -524,7 +583,7 @@ prevention.
 ```bash
 npm install
 cd local-image && npm install && cd ..
-npm test          # 64 tests, no credentials or network needed
+npm test          # 76 tests, no credentials or network needed
 ```
 
 Two things to know before opening a pull request:

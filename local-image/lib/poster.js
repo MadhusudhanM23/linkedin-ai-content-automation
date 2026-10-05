@@ -7,9 +7,15 @@
  * unique, on-brand visual for every post, produced locally with no API call and
  * no GPU. The same topic always yields the same poster, which is what makes the
  * image hash in column F meaningful.
+ *
+ * The lower half is a diagram of whatever the post is actually about - an array
+ * with indices, a request and response, a Big-O chart - chosen by diagrams.js
+ * from the topic text.
  */
 
 const crypto = require('crypto');
+const { escapeXml, measure, wrap, fitSize } = require('./svgutil');
+const diagrams = require('./diagrams');
 
 const THEMES = {
   midnight: { bg0: '#0B1220', bg1: '#141F38', fg: '#F2F6FF', muted: '#8EA0C2', panel: '#16223C' },
@@ -43,76 +49,6 @@ function makeRandom(seed) {
   };
 }
 
-function escapeXml(value) {
-  return String(value === null || value === undefined ? '' : value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-/**
- * Approximate advance width of a string.
- * resvg has no measuring API before render, so wrapping relies on a per-class
- * width table. It is deliberately slightly generous, so lines under-fill rather
- * than overflow the frame.
- */
-const NARROW = "iljtfIr.,'!|:;()[]-";
-const WIDE = 'mwMW@%';
-function measure(textValue, fontSize, bold) {
-  let units = 0;
-  for (const ch of String(textValue)) {
-    if (ch === ' ') units += 0.28;
-    else if (NARROW.includes(ch)) units += 0.32;
-    else if (WIDE.includes(ch)) units += 0.93;
-    else if (ch >= 'A' && ch <= 'Z') units += 0.68;
-    else if (ch >= '0' && ch <= '9') units += 0.58;
-    else units += 0.55;
-  }
-  return units * fontSize * (bold ? 1.04 : 1);
-}
-
-/** Greedy word wrap, hard-splitting any single word too long for the column. */
-function wrap(textValue, fontSize, maxWidth, maxLines, bold) {
-  const words = String(textValue || '').trim().split(/\s+/).filter(Boolean);
-  const lines = [];
-  let current = '';
-
-  for (const word of words) {
-    const candidate = current ? current + ' ' + word : word;
-    if (measure(candidate, fontSize, bold) <= maxWidth) {
-      current = candidate;
-      continue;
-    }
-    if (current) lines.push(current);
-    current = word;
-    while (measure(current, fontSize, bold) > maxWidth && current.length > 1) {
-      let cut = current.length - 1;
-      while (cut > 1 && measure(current.slice(0, cut), fontSize, bold) > maxWidth) cut--;
-      lines.push(current.slice(0, cut));
-      current = current.slice(cut);
-    }
-    if (lines.length >= maxLines) break;
-  }
-  if (current && lines.length < maxLines) lines.push(current);
-
-  if (lines.length > maxLines) lines.length = maxLines;
-  if (lines.length === maxLines && words.length) {
-    // Signal truncation rather than silently dropping content.
-    const last = lines[maxLines - 1];
-    const joined = lines.join(' ');
-    if (joined.length < String(textValue).trim().length) {
-      let trimmed = last;
-      while (trimmed.length > 4 && measure(trimmed + '…', fontSize, bold) > maxWidth) {
-        trimmed = trimmed.slice(0, -1);
-      }
-      lines[maxLines - 1] = trimmed.replace(/[\s,;:-]+$/, '') + '…';
-    }
-  }
-  return lines;
-}
-
 /**
  * Condense a key point into a short chip label.
  *
@@ -138,38 +74,19 @@ function chipLabel(value, limit) {
   return (space > limit * 0.5 ? cut.slice(0, space) : cut).replace(/[\s,;:-]+$/, '') + '…';
 }
 
-/** Abstract node-and-edge motif, positioned deterministically from the seed. */
-function motif(random, x, y, width, height, accentA, accentB) {
-  const count = 5 + Math.floor(random() * 3);
-  const nodes = [];
-  for (let i = 0; i < count; i++) {
-    const t = count === 1 ? 0.5 : i / (count - 1);
-    nodes.push({
-      x: x + 40 + t * (width - 80),
-      y: y + height * (0.25 + random() * 0.5),
-      r: 10 + random() * 16,
-    });
-  }
-
-  let svg = '';
-  for (let i = 0; i < nodes.length - 1; i++) {
-    const a = nodes[i];
-    const b = nodes[i + 1];
-    const midX = (a.x + b.x) / 2;
-    svg += '<path d="M ' + a.x.toFixed(1) + ' ' + a.y.toFixed(1) +
-      ' C ' + midX.toFixed(1) + ' ' + a.y.toFixed(1) + ', ' +
-      midX.toFixed(1) + ' ' + b.y.toFixed(1) + ', ' +
-      b.x.toFixed(1) + ' ' + b.y.toFixed(1) + '" ' +
-      'fill="none" stroke="url(#accent)" stroke-width="3" stroke-opacity="0.45" stroke-linecap="round"/>';
-  }
-  nodes.forEach(function (n, i) {
-    const fill = i % 2 === 0 ? accentA : accentB;
-    svg += '<circle cx="' + n.x.toFixed(1) + '" cy="' + n.y.toFixed(1) + '" r="' + (n.r + 8).toFixed(1) +
-      '" fill="' + fill + '" fill-opacity="0.12"/>';
-    svg += '<circle cx="' + n.x.toFixed(1) + '" cy="' + n.y.toFixed(1) + '" r="' + n.r.toFixed(1) +
-      '" fill="' + fill + '" fill-opacity="0.85"/>';
-  });
-  return svg;
+/**
+ * Short, lower-case stage labels for the diagrams that can take them
+ * (the generic flow and pipeline drawings).
+ */
+function stageLabels(points) {
+  return (Array.isArray(points) ? points : [])
+    .map(function (p) {
+      const clean = chipLabel(p, 60);
+      // The leading clause before a colon or dash is usually the actual name.
+      const head = clean.split(/[:—-]/)[0].trim();
+      return head.length >= 3 && head.length <= 18 ? head.toLowerCase() : '';
+    })
+    .filter(Boolean);
 }
 
 /**
@@ -183,6 +100,7 @@ function motif(random, x, y, width, height, accentA, accentB) {
  * @param {string} [input.footer]      Bottom-left monospace footer.
  * @param {string} [input.format]      'square' (default) or 'portrait'.
  * @param {string} [input.seed]        Overrides the hash seed; defaults to topic.
+ * @param {string} [input.visual]      Diagram kind; auto-detected when absent.
  */
 function buildSvg(input) {
   const opts = input || {};
@@ -198,45 +116,82 @@ function buildSvg(input) {
   const themeKeys = Object.keys(THEMES);
   const theme = THEMES[themeKeys[seed % themeKeys.length]];
   const accent = ACCENTS[(seed >>> 8) % ACCENTS.length];
-  const [accentA, accentB] = accent;
+  const accentA = accent[0];
+  const accentB = accent[1];
 
-  const PAD = 90;
+  const PAD = 88;
   const colWidth = W - PAD * 2;
 
   const label = chipLabel(opts.label || 'Developer Notes', 34).toUpperCase();
-  const titleSize = topic.length > 44 ? 84 : topic.length > 26 ? 100 : 116;
+  const titleSize = topic.length > 44 ? 80 : topic.length > 26 ? 94 : 108;
   const titleLines = wrap(topic, titleSize, colWidth, 3, true);
 
-  const concept = chipLabel(opts.concept || '', 150);
-  const conceptLines = concept ? wrap(concept, 40, colWidth, 2, false) : [];
+  const concept = chipLabel(opts.concept || '', 140);
+  let conceptLines = concept ? wrap(concept, 38, colWidth, 2, false) : [];
 
-  const points = (Array.isArray(opts.points) ? opts.points : [])
-    .map(function (p) { return chipLabel(p, 46); })
+  let points = (Array.isArray(opts.points) ? opts.points : [])
+    .map(function (p) { return chipLabel(p, 54); })
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, 2);
 
-  // Vertical layout, top down.
-  let cursor = PAD + 70;
-  const labelY = cursor;
-  cursor += 74;
+  // Which diagram to draw. An explicit `visual` from the writer wins.
+  //
+  // Otherwise detection cascades, widest signal last: the topic is the subject
+  // of the post and must dominate. Pooling the topic with the concept and the
+  // key points lets an incidental word hijack the choice - a post titled "Why
+  // linked lists are slower" whose concept mentions "the CPU cache" would
+  // otherwise be drawn as a cache diagram.
+  const requested = String(opts.visual || '').trim().toLowerCase();
+  let kind = (requested && diagrams.DRAW[requested]) ? requested : '';
+  if (!kind) {
+    const widen = [
+      topic,
+      topic + ' ' + (opts.concept || ''),
+      topic + ' ' + (opts.concept || '') + ' ' +
+        (Array.isArray(opts.points) ? opts.points.join(' ') : ''),
+    ];
+    kind = 'flow';
+    for (const source of widen) {
+      const found = diagrams.detect(source);
+      if (found !== 'flow') { kind = found; break; }
+    }
+  }
 
-  const titleTop = cursor;
+  // --- vertical layout, top down ------------------------------------------
+  // The diagram gets whatever is left, and the text above it gives ground
+  // until the drawing has room to be legible.
   const titleLineHeight = Math.round(titleSize * 1.14);
-  cursor += titleLines.length * titleLineHeight + 12;
+  const chipHeight = 74;
+  const footerRoom = 64;
+  const MIN_DIAGRAM = 360;
 
-  const ruleY = cursor;
-  cursor += 56;
+  const layout = function () {
+    let cursor = PAD + 62;
+    const labelY = cursor;
+    cursor += 70;
+    const titleTop = cursor;
+    cursor += titleLines.length * titleLineHeight + 10;
+    const ruleY = cursor;
+    cursor += 50;
+    const conceptTop = cursor;
+    cursor += conceptLines.length * 50;
+    if (conceptLines.length) cursor += 18;
+    const chipsTop = cursor;
+    cursor += points.length * (chipHeight + 16);
+    const diagramTop = cursor + 18;
+    const diagramHeight = H - PAD - footerRoom - diagramTop;
+    return {
+      labelY: labelY, titleTop: titleTop, ruleY: ruleY, conceptTop: conceptTop,
+      chipsTop: chipsTop, diagramTop: diagramTop, diagramHeight: diagramHeight,
+    };
+  };
 
-  const conceptTop = cursor;
-  cursor += conceptLines.length * 54;
-  if (conceptLines.length) cursor += 24;
-
-  const chipsTop = cursor;
-  const chipHeight = 78;
-  cursor += points.length * (chipHeight + 20);
-
-  const motifTop = cursor + 20;
-  const motifHeight = Math.max(140, H - PAD - 70 - motifTop);
+  let L = layout();
+  // Drop the least important block first, then the next, until the drawing fits.
+  if (L.diagramHeight < MIN_DIAGRAM && points.length) { points = points.slice(0, 1); L = layout(); }
+  if (L.diagramHeight < MIN_DIAGRAM && points.length) { points = []; L = layout(); }
+  if (L.diagramHeight < MIN_DIAGRAM && conceptLines.length > 1) { conceptLines = conceptLines.slice(0, 1); L = layout(); }
+  if (L.diagramHeight < MIN_DIAGRAM && conceptLines.length) { conceptLines = []; L = layout(); }
 
   let svg = '';
   svg += '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
@@ -262,46 +217,64 @@ function buildSvg(input) {
   svg += '<rect x="0" y="0" width="14" height="' + H + '" fill="url(#accent)"/>';
 
   // Eyebrow label.
-  svg += '<g><rect x="' + PAD + '" y="' + (labelY - 34) + '" width="' +
+  svg += '<g><rect x="' + PAD + '" y="' + (L.labelY - 34) + '" width="' +
     Math.round(measure(label, 26, true) + 44) + '" height="48" rx="24" ' +
     'fill="' + accentA + '" fill-opacity="0.14" stroke="' + accentA + '" stroke-opacity="0.35"/>';
-  svg += '<text x="' + (PAD + 22) + '" y="' + (labelY) + '" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" ' +
+  svg += '<text x="' + (PAD + 22) + '" y="' + L.labelY + '" font-family="' + diagrams.SANS + '" ' +
     'font-size="26" font-weight="600" letter-spacing="2.4" fill="' + accentA + '">' + escapeXml(label) + '</text></g>';
 
   // Title.
   titleLines.forEach(function (line, i) {
-    svg += '<text x="' + PAD + '" y="' + (titleTop + (i + 1) * titleLineHeight - Math.round(titleSize * 0.22)) + '" ' +
-      'font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="' + titleSize + '" ' +
+    svg += '<text x="' + PAD + '" y="' + (L.titleTop + (i + 1) * titleLineHeight - Math.round(titleSize * 0.22)) + '" ' +
+      'font-family="' + diagrams.SANS + '" font-size="' + titleSize + '" ' +
       'font-weight="700" fill="' + theme.fg + '">' + escapeXml(line) + '</text>';
   });
 
-  svg += '<rect x="' + PAD + '" y="' + ruleY + '" width="170" height="10" rx="5" fill="url(#accent)"/>';
+  svg += '<rect x="' + PAD + '" y="' + L.ruleY + '" width="170" height="10" rx="5" fill="url(#accent)"/>';
 
   // Concept line.
   conceptLines.forEach(function (line, i) {
-    svg += '<text x="' + PAD + '" y="' + (conceptTop + (i + 1) * 54 - 14) + '" ' +
-      'font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="40" ' +
+    svg += '<text x="' + PAD + '" y="' + (L.conceptTop + (i + 1) * 50 - 12) + '" ' +
+      'font-family="' + diagrams.SANS + '" font-size="38" ' +
       'fill="' + theme.muted + '">' + escapeXml(line) + '</text>';
   });
 
   // Key-point chips.
   points.forEach(function (point, i) {
-    const y = chipsTop + i * (chipHeight + 20);
+    const y = L.chipsTop + i * (chipHeight + 16);
     svg += '<rect x="' + PAD + '" y="' + y + '" width="' + colWidth + '" height="' + chipHeight + '" rx="18" ' +
       'fill="' + theme.panel + '" fill-opacity="0.85" stroke="' + theme.fg + '" stroke-opacity="0.08"/>';
-    svg += '<rect x="' + (PAD + 18) + '" y="' + (y + 22) + '" width="8" height="' + (chipHeight - 44) + '" rx="4" fill="url(#accent)"/>';
-    svg += '<text x="' + (PAD + 44) + '" y="' + (y + chipHeight / 2 + 12) + '" ' +
-      'font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="34" ' +
+    svg += '<rect x="' + (PAD + 18) + '" y="' + (y + 20) + '" width="8" height="' + (chipHeight - 40) + '" rx="4" fill="url(#accent)"/>';
+    const pointSize = fitSize(point, colWidth - 76, 32, 20, false);
+    svg += '<text x="' + (PAD + 44) + '" y="' + (y + chipHeight / 2 + pointSize * 0.36) + '" ' +
+      'font-family="' + diagrams.SANS + '" font-size="' + pointSize + '" ' +
       'fill="' + theme.fg + '" fill-opacity="0.92">' + escapeXml(point) + '</text>';
   });
 
-  svg += motif(random, PAD - 20, motifTop, colWidth + 40, motifHeight, accentA, accentB);
+  // The diagram. It is capped and centred in whatever space is left, so a short
+  // drawing sits in the middle of the gap rather than stranding its caption at
+  // the bottom of the frame.
+  const availH = Math.max(MIN_DIAGRAM, L.diagramHeight);
+  const useH = Math.min(availH, 500);
+  svg += diagrams.render(kind, {
+    x: PAD,
+    y: L.diagramTop + (availH - useH) / 2,
+    w: colWidth,
+    h: useH,
+    a: accentA,
+    b: accentB,
+    fg: theme.fg,
+    muted: theme.muted,
+    panel: theme.panel,
+    labels: stageLabels(opts.points),
+    random: random,
+  });
 
   // Footer.
   const footer = chipLabel(opts.footer || '', 60);
   if (footer) {
     svg += '<text x="' + PAD + '" y="' + (H - PAD + 18) + '" ' +
-      'font-family="Consolas, SF Mono, Menlo, monospace" font-size="26" ' +
+      'font-family="' + diagrams.MONO + '" font-size="26" ' +
       'fill="' + theme.muted + '" fill-opacity="0.75">' + escapeXml(footer) + '</text>';
   }
 
@@ -318,5 +291,7 @@ module.exports = {
   measure,
   wrap,
   chipLabel,
+  stageLabels,
   buildSvg,
+  detectDiagram: diagrams.detect,
 };

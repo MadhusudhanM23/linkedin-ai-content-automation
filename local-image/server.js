@@ -129,6 +129,7 @@ async function generateImage(input) {
       topic: topic,
       concept: input.concept,
       points: input.points,
+      visual: input.visual,
       label: input.label,
       footer: input.footer,
       format: format,

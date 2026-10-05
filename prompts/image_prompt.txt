@@ -1,16 +1,27 @@
-Create a professional LinkedIn technology visual for:
+Technical diagram for a developer audience.
 
 Topic: {{TOPIC}}
 Concept: {{IMAGE_CONCEPT}}
 
-Requirements:
-- Clean modern developer aesthetic.
-- 1:1 or 4:5 composition.
-- Strong visual hierarchy.
-- Minimal text.
-- No paragraphs.
-- No fake statistics.
-- No copyrighted logos unless explicitly provided.
-- Use diagrams, code-like visual elements, abstract technology shapes,
-  or a simple conceptual illustration.
-- Make the visual understandable without reading the LinkedIn post.
+Draw the thing itself, not a metaphor for it. If the topic is an array, draw
+indexed cells. If it is a request, draw the request and the response. A glowing
+abstract network does not teach anyone anything.
+
+Composition:
+- One idea only. A single diagram, centred, with room around it.
+- 1:1 square.
+- Dark background, one accent colour, high contrast.
+- Flat vector style: clean strokes, solid fills, no gradients on the shapes.
+- Labels only where they carry meaning — a few words at most, never a sentence
+  and never a paragraph.
+- Readable as a thumbnail on a phone.
+
+Avoid:
+- Stock-photo imagery, people at laptops, handshakes, glowing brains.
+- Floating abstract particles, generic "tech" swooshes, circuit-board texture.
+- Invented numbers, fake charts, or axis labels that mean nothing.
+- Company logos or any trademarked mark.
+- Lens flare, 3D bevels, drop shadows, neon glow.
+
+The test: someone who has not read the post should still learn something true
+about {{TOPIC}} from the picture alone.

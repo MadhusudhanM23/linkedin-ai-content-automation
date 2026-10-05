@@ -25,7 +25,7 @@ npm install
 cd local-image && npm install && cd ..
 
 cp .env.example .env     # fill in your own values
-npm test                 # expect: 64 passed, 0 failed
+npm test                 # expect: 76 passed, 0 failed
 ```
 
 The acceptance tests need no network, no Google account and no LinkedIn app, so

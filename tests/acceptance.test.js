@@ -640,7 +640,9 @@ test('Long topics wrap instead of overflowing the frame', () => {
   const svg = poster.buildSvg({
     topic: 'Understanding Eventual Consistency in Distributed Database Systems at Scale',
   });
-  const lines = svg.match(/font-size="(84|100|116)"/g) || [];
+  // Match headline-sized text (>= 70px) rather than exact sizes, so adjusting
+  // the type scale does not break this. Diagram labels are all well under 70.
+  const lines = svg.match(/font-size="(7\d|8\d|9\d|1[01]\d)" font-weight="700"/g) || [];
   assert.ok(lines.length >= 2 && lines.length <= 3, 'expected the title to wrap to 2-3 lines, got ' + lines.length);
 });
 
@@ -660,6 +662,187 @@ test('XML-unsafe characters in a topic cannot break the SVG', () => {
   const svg = poster.buildSvg({ topic: 'A < B && C > D "quoted"' });
   assert.ok(svg.includes('&lt;') && svg.includes('&amp;') && svg.includes('&gt;'));
   assert.ok(!/<text[^>]*>[^<]*<(?!\/text)/.test(svg), 'raw markup leaked into a text node');
+});
+
+
+section('Human voice gate');
+
+test('Banned filler phrases are rejected, not quietly rewritten', () => {
+  const v = require('../lib/validate');
+  const body = "In today's fast-paced world, arrays are a game-changer for developers who "
+    + 'want to delve into performance. '.repeat(4)
+    + 'In conclusion, arrays store elements contiguously in memory. Thoughts?';
+  const res = v.validatePost(JSON.stringify({ post: body, hashtags: ['#DSA'] }), 'arrays', {});
+  assert.ok(!res.ok, 'a post full of filler should not publish');
+  assert.ok(res.errors.some((e) => e.includes('banned filler')), 'expected a banned-filler error');
+});
+
+test('Opening with a rhetorical question is rejected', () => {
+  const v = require('../lib/validate');
+  const tells = v.findTells('Ever thought about how arrays work?\n\nThey store elements contiguously.');
+  assert.ok(tells.structural.some((t) => t.includes('rhetorical question')));
+});
+
+test('Emoji used as bullet points is rejected', () => {
+  const v = require('../lib/validate');
+  const tells = v.findTells('Arrays are fast.\n\n✅ Constant time reads\n✅ Contiguous memory\n✅ Cache friendly');
+  assert.ok(tells.structural.some((t) => t.includes('emoji as bullet')));
+});
+
+test('The "not just X, it is Y" construction is caught', () => {
+  const v = require('../lib/validate');
+  const tells = v.findTells("An index is not just a lookup table, it's a commitment to write cost.");
+  assert.ok(tells.structural.some((t) => t.includes('not just')));
+});
+
+test('Ordinary engineering words only warn, they do not block a post', () => {
+  const v = require('../lib/validate');
+  const tells = v.findTells('Robust error handling matters when you leverage a connection pool.');
+  assert.strictEqual(tells.banned.length, 0, 'common words must not be hard-banned');
+  assert.ok(tells.soft.length >= 2, 'but they should still be flagged as weak');
+  assert.strictEqual(tells.structural.length, 0);
+});
+
+test('A plainly written post passes the voice gate', () => {
+  const v = require('../lib/validate');
+  const body = 'An array read costs one multiplication and one addition.\n\n'
+    + 'The elements sit next to each other in memory, so the address of index i is just '
+    + 'base + i * size. That is the whole trick. It does not matter whether you ask for '
+    + 'the first element or the millionth.\n\n'
+    + 'Inserting is the other story. To put something in the middle you have to shift '
+    + 'everything after it, and that is O(n) no matter how clever you are.\n\n'
+    + 'So reach for an array when you read far more often than you insert.';
+  const res = v.validatePost(JSON.stringify({ post: body, hashtags: ['#DSA'] }), 'array', {});
+  assert.ok(res.ok, 'clean prose should publish, got: ' + res.errors.join('; '));
+  assert.strictEqual(v.findTells(body).banned.length, 0);
+});
+
+section('Diagram selection and bounds');
+
+test('The topic picks a diagram that actually depicts it', () => {
+  const d = require('../local-image/lib/diagrams');
+  const expected = {
+    'DSA on Arrays': 'array',
+    'Why linked lists are slower than you think': 'linkedlist',
+    'Big-O time complexity': 'bigo',
+    'How database indexes work': 'database',
+    'REST API design basics': 'api',
+    'Redis caching strategies': 'cache',
+    'Binary search explained': 'binsearch',
+    'Hash map collisions': 'hashtable',
+  };
+  for (const topic of Object.keys(expected)) {
+    assert.strictEqual(d.detect(topic), expected[topic], 'wrong diagram for "' + topic + '"');
+  }
+});
+
+test('Keywords match whole words, not fragments inside other words', () => {
+  const d = require('../local-image/lib/diagrams');
+  // "throttling" contains "ttl"; "rapid" contains "api"; "digit" contains "git".
+  // A plain substring test drew a cache diagram for a debouncing post.
+  assert.strictEqual(d.detect('Debouncing vs Throttling in JavaScript'), 'flow');
+  assert.strictEqual(d.detect('Rapid prototyping for startups'), 'flow');
+  assert.strictEqual(d.detect('Digit manipulation tricks'), 'flow');
+  assert.strictEqual(d.detect('Legitimate reasons to rewrite a service'), 'flow');
+  // But a genuine mention, including a plural or a suffix, still matches.
+  assert.strictEqual(d.detect('Redis TTL and eviction'), 'cache');
+  assert.strictEqual(d.detect('Database indexes explained'), 'database');
+  assert.strictEqual(d.detect('Working with arrays'), 'array');
+});
+
+test('An unrecognised topic falls back to the neutral flow diagram', () => {
+  const d = require('../local-image/lib/diagrams');
+  assert.strictEqual(d.detect('Lessons from my first year as a manager'), 'flow');
+  const svg = d.render('flow', {
+    x: 0, y: 0, w: 900, h: 400,
+    a: '#38BDF8', b: '#818CF8', fg: '#fff', muted: '#888', panel: '#111',
+  });
+  assert.ok(svg.includes('<rect'));
+});
+
+test('An explicit visual overrides detection, and a bogus one is ignored', () => {
+  const poster = require('../local-image/lib/poster');
+  const forced = poster.buildSvg({ topic: 'DSA on Arrays', visual: 'bigo' });
+  assert.ok(forced.includes('O(log n)'), 'explicit visual should win over the detected one');
+  const bogus = poster.buildSvg({ topic: 'DSA on Arrays', visual: 'not-a-diagram' });
+  assert.ok(bogus.includes('arr[3]'), 'an unknown visual should fall back to detection');
+});
+
+test('Every diagram stays inside the box it is given', () => {
+  const d = require('../local-image/lib/diagrams');
+  const TOL = 2;
+  // Two sizes: the real poster column, and a deliberately cramped one.
+  for (const dims of [[1024, 500], [700, 400]]) {
+    const c = {
+      x: 50, y: 20, w: dims[0], h: dims[1],
+      a: '#38BDF8', b: '#818CF8', fg: '#F2F6FF', muted: '#8EA0C2', panel: '#16223C',
+      labels: [],
+    };
+    const left = c.x - TOL;
+    const right = c.x + c.w + TOL;
+    const top = c.y - TOL;
+    const bottom = c.y + c.h + TOL;
+    for (const kind of Object.keys(d.DRAW)) {
+      const svg = d.render(kind, c);
+      const where = kind + ' at ' + dims.join('x');
+      const check = (x, y, what) => {
+        assert.ok(x >= left && x <= right, where + ': ' + what + ' x=' + x + ' outside [' + left + ',' + right + ']');
+        assert.ok(y >= top && y <= bottom, where + ': ' + what + ' y=' + y + ' outside [' + top + ',' + bottom + ']');
+      };
+      // Shapes carry real geometry; a text x/y is only an anchor, so it is skipped.
+      let m;
+      const rects = /<rect x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)"/g;
+      while ((m = rects.exec(svg))) {
+        check(+m[1], +m[2], 'rect');
+        check(+m[1] + +m[3], +m[2] + +m[4], 'rect far corner');
+      }
+      const circles = /<circle cx="(-?[\d.]+)" cy="(-?[\d.]+)" r="([\d.]+)"/g;
+      while ((m = circles.exec(svg))) {
+        check(+m[1] - +m[3], +m[2] - +m[3], 'circle');
+        check(+m[1] + +m[3], +m[2] + +m[3], 'circle');
+      }
+      const lines = /<line x1="(-?[\d.]+)" y1="(-?[\d.]+)" x2="(-?[\d.]+)" y2="(-?[\d.]+)"/g;
+      while ((m = lines.exec(svg))) {
+        check(+m[1], +m[2], 'line start');
+        check(+m[3], +m[4], 'line end');
+      }
+      const polys = /<polygon points="([^"]+)"/g;
+      while ((m = polys.exec(svg))) {
+        for (const pt of m[1].trim().split(/\s+/)) {
+          const xy = pt.split(',');
+          check(+xy[0], +xy[1], 'polygon point');
+        }
+      }
+    }
+  }
+});
+
+test('The topic wins over an incidental word in the concept line', () => {
+  const poster = require('../local-image/lib/poster');
+  // "CPU cache" in the concept must not turn a linked-list post into a cache
+  // diagram: the topic is the subject.
+  const svg = poster.buildSvg({
+    topic: 'Why linked lists are slower than you think',
+    concept: 'Pointer chasing defeats the CPU cache',
+    points: ['Traversal costs a cache miss per node'],
+  });
+  assert.ok(svg.includes('null'), 'expected the linked-list diagram');
+  assert.ok(!svg.includes('A hit returns in microseconds'), 'drew the cache diagram instead');
+});
+
+test('The poster still renders for every diagram kind', () => {
+  const poster = require('../local-image/lib/poster');
+  const d = require('../local-image/lib/diagrams');
+  for (const kind of Object.keys(d.DRAW)) {
+    const svg = poster.buildSvg({
+      topic: 'A topic that is reasonably long for a headline',
+      concept: 'Some explanatory concept line that spans a little width',
+      points: ['First key point about the subject', 'Second key point here'],
+      visual: kind,
+    });
+    assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>'), kind + ' produced malformed SVG');
+    assert.ok(!/<text[^>]*>[^<]*<(?!\/text)/.test(svg), kind + ' leaked markup into a text node');
+  }
 });
 
 // ===========================================================================

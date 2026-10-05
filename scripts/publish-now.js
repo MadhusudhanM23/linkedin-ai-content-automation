@@ -113,7 +113,7 @@ async function main() {
 
   const r2 = await gemini(env.GEMINI_MODEL || 'gemini-2.5-flash', {
     contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],
-    generationConfig: { temperature: 0.8, responseMimeType: 'application/json' },
+    generationConfig: { temperature: 0.95, topP: 0.95, responseMimeType: 'application/json' },
   });
 
   const post = validate.validatePost(r2.text, TOPIC, { researchUrls: researchUrls, sha256: sha256 });
@@ -140,6 +140,7 @@ async function main() {
     body: JSON.stringify({
       topic: TOPIC,
       concept: post.post.imageConcept,
+      visual: post.post.visual,
       points: research.data.key_points.slice(0, 3),
       label: 'Developer Notes',
       footer: new Date().toLocaleDateString('en-GB'),

@@ -133,7 +133,7 @@ async function main() {
 
   const writerRaw = await gemini(env.GEMINI_MODEL || 'gemini-2.5-flash', {
     contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],
-    generationConfig: { temperature: 0.8, responseMimeType: 'application/json' },
+    generationConfig: { temperature: 0.95, topP: 0.95, responseMimeType: 'application/json' },
   });
 
   const postResult = validate.validatePost(partsText(writerRaw), TOPIC, {
@@ -172,6 +172,7 @@ async function main() {
       body: JSON.stringify({
         topic: TOPIC,
         concept: postResult.post.imageConcept,
+        visual: postResult.post.visual,
         points: researchResult.data.key_points.slice(0, 3),
         label: 'Developer Notes',
         footer: new Date().toLocaleDateString('en-GB'),
