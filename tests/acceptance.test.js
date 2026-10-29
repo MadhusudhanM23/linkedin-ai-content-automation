@@ -1016,6 +1016,23 @@ test('A mechanism in the headline beats a broad topic word', () => {
 });
 
 
+section('Prompt placeholders');
+
+test('Every placeholder the writer prompt uses is one the scripts fill in', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const prompt = fs.readFileSync(path.join(__dirname, '..', 'prompts', 'writer_prompt.txt'), 'utf8');
+  const used = new Set((prompt.match(/\{\{[A-Z_]+\}\}/g) || []));
+  const filled = new Set(['{{TOPIC}}', '{{TOPIC_WORDS}}', '{{RESEARCH_JSON}}', '{{MIN_WORDS}}', '{{MAX_WORDS}}', '{{TARGET_WORDS}}']);
+  for (const u of used) assert.ok(filled.has(u), u + ' appears in the prompt but no script fills it');
+  // And the one that matters for the topic guard is actually on the schema.
+  assert.ok(/"title":[^\n]*\{\{TOPIC_WORDS\}\}/.test(prompt), 'the title field must name the required topic words');
+  for (const p of ['run-once.js', 'publish-now.js', 'dry-run.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', p), 'utf8');
+    assert.ok(src.includes('TOPIC_WORDS'), p + ' does not fill TOPIC_WORDS');
+  }
+});
+
 section('Word budget');
 
 test('A post over the word limit is rejected, not trimmed', () => {

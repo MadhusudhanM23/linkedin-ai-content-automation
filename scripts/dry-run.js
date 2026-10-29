@@ -122,6 +122,7 @@ async function main() {
   const maxWords = Number(env.POST_MAX_WORDS) > 0 ? Number(env.POST_MAX_WORDS) : validate.DEFAULT_MAX_WORDS;
   const writerPrompt = fs.readFileSync(path.join(ROOT, 'prompts', 'writer_prompt.txt'), 'utf8')
     .replace(/\{\{TOPIC\}\}/g, TOPIC)
+    .replace(/\{\{TOPIC_WORDS\}\}/g, validate.topicTokens(TOPIC).join(', ') || TOPIC)
     .replace(/\{\{RESEARCH_JSON\}\}/g, JSON.stringify(researchResult.data))
     .replace(/\{\{MIN_WORDS\}\}/g, String(minWords))
     .replace(/\{\{MAX_WORDS\}\}/g, String(maxWords))

@@ -183,6 +183,7 @@ async function main() {
     const maxWords = Number(env.POST_MAX_WORDS) > 0 ? Number(env.POST_MAX_WORDS) : validate.DEFAULT_MAX_WORDS;
     const writerPrompt = prompt('writer_prompt.txt', {
       TOPIC: row.topic,
+      TOPIC_WORDS: validate.topicTokens(row.topic).join(', ') || row.topic,
       RESEARCH_JSON: JSON.stringify(research.data),
       MIN_WORDS: String(minWords),
       MAX_WORDS: String(maxWords),
