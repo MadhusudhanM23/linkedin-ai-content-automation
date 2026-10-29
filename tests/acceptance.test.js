@@ -704,6 +704,20 @@ test('The "not just X, it is Y" construction is caught', () => {
   assert.ok(tells.structural.some((t) => t.includes('not just')));
 });
 
+test('A narrowed angle passes the topic check when the headline carries the topic', () => {
+  const v = require('../lib/validate');
+  // Body never says "Java" or "API" - the angle step moved it to BigDecimal.
+  const body = 'BigDecimal.divide throws ArithmeticException the moment a quotient does not terminate. '
+    + 'One third has no finite decimal expansion, so the call cannot return an exact result and refuses to guess. '
+    + 'Pass a MathContext or a scale and rounding mode and it returns the rounded value instead. '
+    + 'Most production code wants the second form, and it is the one that is easy to forget to write.';
+  const rejected = v.validatePost(JSON.stringify({ post: body, hashtags: ['#Java'] }), 'Java API', {});
+  assert.ok(!rejected.ok, 'no topic word anywhere should still be rejected');
+  assert.ok(rejected.errors.some((e) => /headline/.test(e)));
+  const accepted = v.validatePost(JSON.stringify({ post: body, hashtags: ['#Java'], title: 'Java divides, then refuses' }), 'Java API', {});
+  assert.ok(accepted.ok, 'the topic word in the published headline is enough: ' + accepted.errors.join('; '));
+});
+
 test('Ordinary engineering words only warn, they do not block a post', () => {
   const v = require('../lib/validate');
   const tells = v.findTells('Robust error handling matters when you leverage a connection pool.');

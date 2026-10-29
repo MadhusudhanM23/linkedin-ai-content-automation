@@ -121,6 +121,11 @@ async function main() {
   rule('3. VALIDATION');
   console.log('  ' + (post.ok ? 'PASS' : 'REJECTED'));
   post.errors.forEach((e) => console.log('    error:   ' + e));
+  if (!post.ok && post.post) {
+    // Show what was rejected, or there is nothing to learn from the rejection.
+    console.log('\n  --- rejected headline ---\n  ' + (post.post.title || '(none)'));
+    console.log('  --- rejected body (first 1500 chars) ---\n' + String(post.post.body || '').slice(0, 1500));
+  }
   post.warnings.forEach((w) => console.log('    warning: ' + w));
   if (!post.ok) {
     process.exitCode = 1;
