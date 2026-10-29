@@ -26,6 +26,7 @@ const ROOT = path.join(__dirname, '..');
 const sched = require(path.join(ROOT, 'lib', 'scheduler'));
 const time = require(path.join(ROOT, 'lib', 'time'));
 const validate = require(path.join(ROOT, 'lib', 'validate'));
+const llm = require(path.join(__dirname, 'llm'));
 
 const LIVE = process.argv.includes('--live');
 const sha256 = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest('hex');
@@ -81,82 +82,6 @@ function writeCells(updates) {
 }
 
 /* ----------------------------------------------------------------- gemini */
-
-async function gemini(model, body) {
-  const base = env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1beta';
-  const res = await fetch(base + '/models/' + model + ':generateContent', {
-    method: 'POST',
-    headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error('Gemini HTTP ' + res.status + ': ' + text.slice(0, 300));
-  const json = JSON.parse(text);
-  const parts = (((json.candidates || [])[0] || {}).content || {}).parts || [];
-  return { json: json, text: parts.map((p) => p.text || '').join('\n').trim() };
-}
-
-/**
- * Claude fallback, used only when Gemini fails.
- *
- * This is a PAID API - there is no free tier - so it is deliberately never the
- * first choice. It also has no Google Search grounding, which is why callers
- * must treat its research as unverified (see strictUrls in lib/validate.js).
- */
-async function claude(promptText) {
-  if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set, so there is no fallback');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: promptText }],
-    }),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error('Claude HTTP ' + res.status + ': ' + text.slice(0, 300));
-  const json = JSON.parse(text);
-  return { json: json, text: (json.content || []).map((b) => b.text || '').join('\n').trim() };
-}
-
-/**
- * Try Gemini first, fall back to Claude.
- * Returns { text, json, provider, grounded }.
- */
-async function generate(model, body, promptText) {
-  try {
-    const out = await gemini(model, body);
-    const chunks = ((((out.json.candidates || [])[0] || {}).groundingMetadata || {}).groundingChunks || []);
-    return { text: out.text, json: out.json, provider: 'gemini', grounded: chunks.length > 0 };
-  } catch (firstErr) {
-    // The Google Search tool is a separate, busier service than the model.
-    // When a grounded call fails, retry the same prompt without the tool
-    // before paying for Claude: still free, and the validator already treats
-    // ungrounded research as unverified, so no URL can reach the post.
-    if (body.tools) {
-      try {
-        const bare = Object.assign({}, body);
-        delete bare.tools;
-        const out = await gemini(model, bare);
-        log('Gemini grounded call failed (' + String(firstErr.message).slice(0, 80)
-          + ') - succeeded without search grounding');
-        return { text: out.text, json: out.json, provider: 'gemini-ungrounded', grounded: false };
-      } catch (retryErr) {
-        log('Gemini also failed without search grounding (' + String(retryErr.message).slice(0, 80) + ')');
-      }
-    }
-    const err = firstErr;
-    log('Gemini failed (' + String(err.message).slice(0, 120) + ') - falling back to Claude');
-    const out = await claude(promptText);
-    log('Claude responded - NOTE: paid API, and no search grounding');
-    return { text: out.text, json: out.json, provider: 'claude', grounded: false };
-  }
-}
 
 function prompt(name, vars) {
   let text = fs.readFileSync(path.join(ROOT, 'prompts', name), 'utf8');
@@ -234,7 +159,7 @@ async function main() {
   try {
     // -- research --------------------------------------------------------
     const researchPrompt = prompt('research_prompt.txt', { TOPIC: row.topic, DATE: row.dateRaw });
-    const r1 = await generate(env.GEMINI_RESEARCH_MODEL || 'gemini-2.5-flash', {
+    const r1 = await llm.generate({ env: env, log: log }, env.GEMINI_RESEARCH_MODEL || 'gemini-2.5-flash', {
       contents: [{ role: 'user', parts: [{ text: researchPrompt }] }],
       tools: [{ google_search: {} }],
       generationConfig: { temperature: 0.3 },
@@ -264,7 +189,7 @@ async function main() {
       // Models overrun. Asking for ~80% of the cap lands them under it.
       TARGET_WORDS: String(Math.round(maxWords * 0.8)),
     });
-    const r2 = await generate(env.GEMINI_MODEL || 'gemini-2.5-flash', {
+    const r2 = await llm.generate({ env: env, log: log }, env.GEMINI_MODEL || 'gemini-2.5-flash', {
       contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],
       // Higher than the research call: sentence rhythm is what makes a post read
       // as human, and low temperature flattens it.

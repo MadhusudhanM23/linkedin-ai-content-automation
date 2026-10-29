@@ -21,6 +21,7 @@ const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..');
 const validate = require(path.join(ROOT, 'lib', 'validate'));
+const llm = require(path.join(__dirname, 'llm'));
 
 const PUBLISH = process.argv.includes('--publish');
 const TOPIC = process.argv.slice(2).filter((a) => !a.startsWith('--'))[0] || 'DSA on ARRay';
@@ -45,76 +46,6 @@ const LI_VERSION = env.LINKEDIN_API_VERSION || '202609';
 
 function rule(t) {
   console.log('\n' + '='.repeat(68) + '\n' + t + '\n' + '='.repeat(68));
-}
-
-/**
- * Claude fallback, used only when Gemini fails - the same arrangement the
- * scheduler has. PAID, and no search grounding, so research that comes
- * through here is treated as unverified (strictUrls below).
- */
-async function claude(promptText) {
-  if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set, so there is no fallback');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: promptText }],
-    }),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error('Claude HTTP ' + res.status + ': ' + text.slice(0, 300));
-  const json = JSON.parse(text);
-  return { json: json, text: (json.content || []).map((b) => b.text || '').join('\n').trim() };
-}
-
-/** Try Gemini first, fall back to Claude. Returns { text, json, provider, grounded }. */
-async function generate(model, body, promptText) {
-  try {
-    const out = await gemini(model, body);
-    const chunks = ((((out.json.candidates || [])[0] || {}).groundingMetadata || {}).groundingChunks || []);
-    return { text: out.text, json: out.json, provider: 'gemini', grounded: chunks.length > 0 };
-  } catch (firstErr) {
-    // The Google Search tool is a separate, busier service than the model.
-    // When a grounded call fails, retry the same prompt without the tool
-    // before paying for Claude: still free, and the validator already treats
-    // ungrounded research as unverified, so no URL can reach the post.
-    if (body.tools) {
-      try {
-        const bare = Object.assign({}, body);
-        delete bare.tools;
-        const out = await gemini(model, bare);
-        console.log('  ' + 'Gemini grounded call failed (' + String(firstErr.message).slice(0, 80)
-          + ') - succeeded without search grounding');
-        return { text: out.text, json: out.json, provider: 'gemini-ungrounded', grounded: false };
-      } catch (retryErr) {
-        console.log('  ' + 'Gemini also failed without search grounding (' + String(retryErr.message).slice(0, 80) + ')');
-      }
-    }
-    const err = firstErr;
-    console.log('  Gemini failed (' + String(err.message).slice(0, 100) + ')');
-    console.log('  falling back to Claude - PAID, and no search grounding');
-    const out = await claude(promptText);
-    return { text: out.text, json: out.json, provider: 'claude', grounded: false };
-  }
-}
-
-async function gemini(model, body) {
-  const res = await fetch(GEM_BASE + '/models/' + model + ':generateContent', {
-    method: 'POST',
-    headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error('Gemini HTTP ' + res.status + ': ' + text.slice(0, 300));
-  const json = JSON.parse(text);
-  const parts = (((json.candidates || [])[0] || {}).content || {}).parts || [];
-  return { json: json, text: parts.map((p) => p.text || '').join('\n').trim() };
 }
 
 function liHeaders(extra) {
@@ -143,7 +74,7 @@ async function main() {
     .replace(/\{\{TOPIC\}\}/g, TOPIC)
     .replace(/\{\{DATE\}\}/g, new Date().toLocaleDateString('en-GB'));
 
-  const r1 = await generate(env.GEMINI_RESEARCH_MODEL || 'gemini-2.5-flash', {
+  const r1 = await llm.generate({ env: env, log: (m) => console.log('  ' + m) }, env.GEMINI_RESEARCH_MODEL || 'gemini-2.5-flash', {
     contents: [{ role: 'user', parts: [{ text: researchPrompt }] }],
     tools: [{ google_search: {} }],
     generationConfig: { temperature: 0.3 },
@@ -177,7 +108,7 @@ async function main() {
     .replace(/\{\{MAX_WORDS\}\}/g, String(maxWords))
     .replace(/\{\{TARGET_WORDS\}\}/g, String(Math.round(maxWords * 0.8)));
 
-  const r2 = await generate(env.GEMINI_MODEL || 'gemini-2.5-flash', {
+  const r2 = await llm.generate({ env: env, log: (m) => console.log('  ' + m) }, env.GEMINI_MODEL || 'gemini-2.5-flash', {
     contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],
     generationConfig: { temperature: 0.95, topP: 0.95, responseMimeType: 'application/json' },
   }, writerPrompt);

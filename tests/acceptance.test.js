@@ -25,15 +25,24 @@ let passed = 0;
 let failed = 0;
 const failures = [];
 
+// Async tests return a promise; the summary waits for all of them.
+const pending = [];
 function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log('  PASS  ' + name);
-  } catch (err) {
+  const pass = () => { passed++; console.log('  PASS  ' + name); };
+  const fail = (err) => {
     failed++;
     failures.push({ name, err });
     console.log('  FAIL  ' + name + '\n        ' + err.message);
+  };
+  try {
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      pending.push(result.then(pass, fail));
+      return;
+    }
+    pass();
+  } catch (err) {
+    fail(err);
   }
 }
 
@@ -1042,12 +1051,110 @@ test('Code tokens count like any other word, so a snippet cannot hide length', (
   assert.strictEqual(v.countWords('   '), 0);
 });
 
-// ===========================================================================
-console.log('\n' + '='.repeat(60));
-console.log(passed + ' passed, ' + failed + ' failed');
-if (failed) {
-  console.log('\nFailures:');
-  for (const f of failures) console.log('  ' + f.name + '\n    ' + (f.err.stack || f.err.message).split('\n').slice(0, 3).join('\n    '));
+
+section('Provider fallback chain');
+
+// Canned responses stand in for the network. Each call to the fake fetch
+// pops the next scripted reply, so the test asserts the ORDER providers run.
+function fakeFetch(script) {
+  const calls = [];
+  const fn = async (url, opts) => {
+    calls.push({ url: String(url), body: opts && opts.body ? JSON.parse(opts.body) : null });
+    const next = script.shift();
+    if (!next) throw new Error('unexpected extra call to ' + url);
+    return { ok: next.status === 200, status: next.status, text: async () => next.text };
+  };
+  fn.calls = calls;
+  return fn;
 }
-console.log('='.repeat(60));
-process.exit(failed ? 1 : 0);
+const gem = (text, grounded) => JSON.stringify({ candidates: [{
+  content: { parts: [{ text }] },
+  groundingMetadata: grounded ? { groundingChunks: [{ web: { uri: 'https://x' } }] } : undefined,
+}] });
+const poll = (text) => JSON.stringify({ choices: [{ message: { content: text } }] });
+const ENV = { GEMINI_API_KEY: 'k', ANTHROPIC_API_KEY: 'a' };
+const BODY = { contents: [], tools: [{ google_search: {} }] };
+
+test('Grounded Gemini wins outright when it answers', async () => {
+  const llm = require('../scripts/llm');
+  const f = fakeFetch([{ status: 200, text: gem('{"a":1}', true) }]);
+  const r = await llm.generate({ env: ENV, fetch: f }, 'm', BODY, 'p');
+  assert.strictEqual(r.provider, 'gemini');
+  assert.strictEqual(r.grounded, true);
+  assert.strictEqual(f.calls.length, 1);
+});
+
+test('A search-tool failure retries Gemini without the tool before anything paid', async () => {
+  const llm = require('../scripts/llm');
+  const f = fakeFetch([{ status: 503, text: 'busy' }, { status: 200, text: gem('{"a":1}', false) }]);
+  const r = await llm.generate({ env: ENV, fetch: f }, 'm', BODY, 'p');
+  assert.strictEqual(r.provider, 'gemini-ungrounded');
+  assert.strictEqual(r.grounded, false, 'an ungrounded answer must be marked so URLs get blocked');
+  assert.strictEqual(f.calls.length, 2);
+  assert.ok(!f.calls[1].body.tools, 'the retry must drop the search tool');
+});
+
+test('When Gemini is out, free Pollinations text runs before paid Claude', async () => {
+  const llm = require('../scripts/llm');
+  const f = fakeFetch([{ status: 429, text: 'quota' }, { status: 429, text: 'quota' }, { status: 200, text: poll('{"a":1}') }]);
+  const r = await llm.generate({ env: ENV, fetch: f }, 'm', BODY, 'p');
+  assert.strictEqual(r.provider, 'pollinations');
+  assert.strictEqual(r.grounded, false);
+  assert.strictEqual(r.text, '{"a":1}');
+  assert.ok(f.calls[2].url.includes('text.pollinations.ai'));
+  assert.strictEqual(f.calls[2].body.response_format.type, 'json_object', 'must ask for JSON');
+  // A reasoning model spends its default cap thinking; without this the JSON came back truncated.
+  assert.ok(f.calls[2].body.max_tokens >= 4096, 'must raise max_tokens for the reasoning model');
+});
+
+test('Claude is last, and only reached when every free path has failed', async () => {
+  const llm = require('../scripts/llm');
+  const f = fakeFetch([
+    { status: 429, text: 'q' }, { status: 429, text: 'q' }, { status: 500, text: 'down' },
+    { status: 200, text: JSON.stringify({ content: [{ text: '{"a":1}' }] }) },
+  ]);
+  const r = await llm.generate({ env: ENV, fetch: f }, 'm', BODY, 'p');
+  assert.strictEqual(r.provider, 'claude');
+  assert.ok(f.calls[3].url.includes('api.anthropic.com'));
+});
+
+test('A Pollinations rate limit waits the hinted time and retries instead of failing', async () => {
+  const llm = require('../scripts/llm');
+  const limited = JSON.stringify({ status: 402, error: { code: 'FREE_LIMIT', message: 'Free limit reached: 1 reply every 30 seconds per IP. Retry after 4s' } });
+  const f = fakeFetch([{ status: 429, text: 'q' }, { status: 429, text: 'q' }, { status: 402, text: limited }, { status: 200, text: poll('{"a":1}') }]);
+  const waits = [];
+  const r = await llm.generate({ env: ENV, fetch: f, sleep: async (ms) => { waits.push(ms); } }, 'm', BODY, 'p');
+  assert.strictEqual(r.provider, 'pollinations');
+  assert.deepStrictEqual(waits, [5000], 'should sleep (hint + 1)s once, then retry');
+  assert.strictEqual(f.calls.filter((c) => c.url.includes('pollinations')).length, 2);
+});
+
+test('POLLINATIONS_TEXT=false skips that provider entirely', async () => {
+  const llm = require('../scripts/llm');
+  const f = fakeFetch([
+    { status: 429, text: 'q' }, { status: 429, text: 'q' },
+    { status: 200, text: JSON.stringify({ content: [{ text: '{"a":1}' }] }) },
+  ]);
+  const r = await llm.generate({ env: Object.assign({ POLLINATIONS_TEXT: 'false' }, ENV), fetch: f }, 'm', BODY, 'p');
+  assert.strictEqual(r.provider, 'claude');
+  assert.ok(f.calls.every((c) => !c.url.includes('pollinations')));
+});
+
+test('When everything fails the last error is raised, not swallowed', async () => {
+  const llm = require('../scripts/llm');
+  const f = fakeFetch([{ status: 429, text: 'q' }, { status: 429, text: 'q' }, { status: 500, text: 'd' }, { status: 401, text: 'bad key' }]);
+  await assert.rejects(llm.generate({ env: ENV, fetch: f }, 'm', BODY, 'p'), /Claude HTTP 401/);
+});
+
+
+// ===========================================================================
+Promise.all(pending).then(() => {
+  console.log('\n' + '='.repeat(60));
+  console.log(passed + ' passed, ' + failed + ' failed');
+  if (failed) {
+    console.log('\nFailures:');
+    for (const f of failures) console.log('  ' + f.name + '\n    ' + (f.err.stack || f.err.message).split('\n').slice(0, 3).join('\n    '));
+  }
+  console.log('='.repeat(60));
+  process.exit(failed ? 1 : 0);
+});
