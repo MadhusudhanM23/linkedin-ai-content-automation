@@ -89,11 +89,11 @@ async function generate(model, body, promptText) {
         const bare = Object.assign({}, body);
         delete bare.tools;
         const out = await gemini(model, bare);
-        (m) => console.log('  ' + m)('Gemini grounded call failed (' + String(firstErr.message).slice(0, 80)
+        console.log('  ' + 'Gemini grounded call failed (' + String(firstErr.message).slice(0, 80)
           + ') - succeeded without search grounding');
         return { text: out.text, json: out.json, provider: 'gemini-ungrounded', grounded: false };
       } catch (retryErr) {
-        (m) => console.log('  ' + m)('Gemini also failed without search grounding (' + String(retryErr.message).slice(0, 80) + ')');
+        console.log('  ' + 'Gemini also failed without search grounding (' + String(retryErr.message).slice(0, 80) + ')');
       }
     }
     const err = firstErr;
