@@ -145,7 +145,6 @@ function buildArtSvg(input, ctx) {
   svg += '<image x="0" y="0" width="' + W + '" height="' + H + '" ' +
     'preserveAspectRatio="xMidYMid slice" xlink:href="' + opts.artwork + '"/>';
   svg += '<rect width="' + W + '" height="' + H + '" fill="url(#scrim)"/>';
-  svg += '<rect x="0" y="0" width="14" height="' + H + '" fill="url(#accent)"/>';
 
   const label = chipLabel(opts.label || 'Developer Notes', 34).toUpperCase();
   svg += '<g><rect x="' + PAD + '" y="' + (labelY - 34) + '" width="' +
@@ -318,8 +317,6 @@ function buildSvg(input) {
   svg += '<rect width="' + W + '" height="' + H + '" fill="url(#grid)"/>';
   svg += '<circle cx="' + (W - 120) + '" cy="140" r="420" fill="url(#glow)"/>';
 
-  // Accent spine down the left gutter.
-  svg += '<rect x="0" y="0" width="14" height="' + H + '" fill="url(#accent)"/>';
 
   // Eyebrow label.
   svg += '<g><rect x="' + PAD + '" y="' + (L.labelY - 34) + '" width="' +
