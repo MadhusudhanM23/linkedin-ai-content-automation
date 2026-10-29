@@ -155,6 +155,20 @@ Then write "title": a real headline for THAT angle. Not the topic again.
 Two to six words. Concrete. No colon restating the topic. This headline is
 printed on the image, so it has to make sense on its own.
 
+KEEP THE TOPIC VISIBLE. Narrowing the angle does not mean hiding the
+subject. A post scheduled as "Java API" that never says "Java" is
+rejected by the validator, and it also leaves a reader scanning the feed
+with no idea what it is about. So at least one significant word from the
+topic exactly as given - here: {{TOPIC}} - must appear in the headline or
+in the first sentence of the post. Usually the headline is the natural
+place:
+
+  Topic "Java API", angle: DirectoryStream iteration
+    Bad   "Guard DirectoryStream Startup"
+    Good  "Java's DirectoryStream can throw mid-loop"
+
+Hashtags do not count for this; the word has to be in the text.
+
 ════════════════════════════════════════════════════════════════════
 SHAPE — pick ONE, do not blend them
 ════════════════════════════════════════════════════════════════════
@@ -227,7 +241,8 @@ HARD LIMITS — enforced by a validator, violations are not published
 ════════════════════════════════════════════════════════════════════
 
   • "post" must be {{MIN_WORDS}} to {{MAX_WORDS}} words, hashtags excluded.
-  • "post" must clearly address: {{TOPIC}}
+  • The headline or the first sentence must contain at least one
+    significant word from the topic as given: {{TOPIC}}
   • Put NO url in "post" unless that exact url appears in the research
     sources. If the research has no sources, use no urls at all.
   • No markdown characters anywhere in "post".
