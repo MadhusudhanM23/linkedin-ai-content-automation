@@ -74,12 +74,21 @@ async function pollinations(ctx, promptText) {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const t = withTimeout(timeoutMs);
     try {
+      // The endpoint caches replies by prompt text. A truncated reply once
+      // came back byte-for-byte identical on every retry, so each call gets
+      // a unique trailer that the model ignores and the cache cannot match.
+      const userContent = promptText + '\n\n(request ' + Date.now().toString(36) + '-' + attempt + ')';
       const res = await (ctx.fetch || fetch)(POLLINATIONS_TEXT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
         body: JSON.stringify({
           model: env.POLLINATIONS_TEXT_MODEL || 'openai',
-          messages: [{ role: 'user', content: promptText }],
+          messages: [{ role: 'user', content: userContent }],
+          // The only anonymous-tier model reasons before answering. Low effort
+          // keeps that reasoning from consuming the answer's token budget:
+          // default effort produced 453 chars from 1500 tokens; low produced
+          // a complete 4,352-char reply from 1,059.
+          reasoning_effort: env.POLLINATIONS_TEXT_REASONING || 'low',
           // Every prompt in prompts/ demands JSON; ask the endpoint to enforce it.
           response_format: { type: 'json_object' },
           // The default model (gpt-oss-20b) reasons before it answers, and the
@@ -92,11 +101,14 @@ async function pollinations(ctx, promptText) {
       });
       const text = await res.text();
 
-      if (res.status === 402 || res.status === 429) {
+      // 402/429: per-IP rate limit. 503: "The Classic API is at its limit
+      // right now". Both are capacity, both carry a "Retry after Ns" hint,
+      // and both clear on their own - so both are waited out, not fatal.
+      if (res.status === 402 || res.status === 429 || res.status === 503) {
         let waitMs = 31000;
         const m = /Retry after (\d+)/i.exec(text);
         if (m) waitMs = (parseInt(m[1], 10) + 1) * 1000;
-        lastErr = new Error('Pollinations text rate limited (HTTP ' + res.status + ')');
+        lastErr = new Error('Pollinations text ' + (res.status === 503 ? 'at capacity' : 'rate limited') + ' (HTTP ' + res.status + ')');
         if (attempt < attempts) {
           log('Pollinations text rate limited - waiting ' + Math.round(waitMs / 1000) + 's (attempt ' + attempt + '/' + attempts + ')');
           await sleepFn(Math.min(waitMs, 60000));
@@ -112,7 +124,7 @@ async function pollinations(ctx, promptText) {
       return { json: json, text: String(content).trim() };
     } catch (err) {
       lastErr = err.name === 'AbortError' ? new Error('Pollinations text timed out after ' + timeoutMs + 'ms') : err;
-      if (attempt >= attempts || !/rate limited|timed out/.test(lastErr.message)) throw lastErr;
+      if (attempt >= attempts || !/rate limited|at capacity|timed out/.test(lastErr.message)) throw lastErr;
       log('Pollinations text: ' + short(lastErr) + ' - retrying (attempt ' + attempt + '/' + attempts + ')');
     } finally {
       t.clear();

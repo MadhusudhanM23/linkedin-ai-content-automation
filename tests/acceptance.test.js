@@ -1105,6 +1105,8 @@ test('When Gemini is out, free Pollinations text runs before paid Claude', async
   assert.strictEqual(f.calls[2].body.response_format.type, 'json_object', 'must ask for JSON');
   // A reasoning model spends its default cap thinking; without this the JSON came back truncated.
   assert.ok(f.calls[2].body.max_tokens >= 4096, 'must raise max_tokens for the reasoning model');
+  assert.strictEqual(f.calls[2].body.reasoning_effort, 'low', 'low effort keeps reasoning off the answer budget');
+  assert.ok(/\(request [0-9a-z]+-1\)$/.test(f.calls[2].body.messages[0].content), 'each call needs a cache-busting trailer');
 });
 
 test('Claude is last, and only reached when every free path has failed', async () => {
@@ -1127,6 +1129,16 @@ test('A Pollinations rate limit waits the hinted time and retries instead of fai
   assert.strictEqual(r.provider, 'pollinations');
   assert.deepStrictEqual(waits, [5000], 'should sleep (hint + 1)s once, then retry');
   assert.strictEqual(f.calls.filter((c) => c.url.includes('pollinations')).length, 2);
+});
+
+test('A Pollinations 503 "at its limit" is waited out like a rate limit, not treated as fatal', async () => {
+  const llm = require('../scripts/llm');
+  const busy = JSON.stringify({ status: 503, error: { code: 'SERVICE_UNAVAILABLE', message: 'The Classic API is at its limit right now. Retry after 9s' } });
+  const f = fakeFetch([{ status: 429, text: 'q' }, { status: 429, text: 'q' }, { status: 503, text: busy }, { status: 200, text: poll('{"a":1}') }]);
+  const waits = [];
+  const r = await llm.generate({ env: ENV, fetch: f, sleep: async (ms) => { waits.push(ms); } }, 'm', BODY, 'p');
+  assert.strictEqual(r.provider, 'pollinations');
+  assert.deepStrictEqual(waits, [10000]);
 });
 
 test('POLLINATIONS_TEXT=false skips that provider entirely', async () => {
