@@ -90,6 +90,98 @@ function stageLabels(points) {
 }
 
 /**
+ * Hybrid poster: generated artwork behind, real vector text in front.
+ *
+ * The artwork is a data URI embedded straight into the SVG, so the existing
+ * resvg pipeline composites it with no extra dependency. Text is never baked
+ * into the image by the model - it is drawn here, which is the whole point:
+ * image models cannot spell, and a garbled headline is worse than no art.
+ */
+function buildArtSvg(input, ctx) {
+  const opts = input;
+  const W = ctx.W;
+  const H = ctx.H;
+  const theme = ctx.theme;
+  const accentA = ctx.accentA;
+  const PAD = ctx.PAD;
+  const colWidth = ctx.colWidth;
+
+  const headline = ctx.headline;
+  const titleSize = headline.length > 44 ? 80 : headline.length > 26 ? 94 : 108;
+  const titleLines = wrap(headline, titleSize, colWidth, 3, true);
+  const titleLineHeight = Math.round(titleSize * 1.14);
+
+  const concept = chipLabel(opts.concept || '', 140);
+  const conceptLines = concept ? wrap(concept, 38, colWidth, 2, false) : [];
+
+  let cursor = PAD + 62;
+  const labelY = cursor;
+  cursor += 70;
+  const titleTop = cursor;
+  cursor += titleLines.length * titleLineHeight + 10;
+  const ruleY = cursor;
+  cursor += 50;
+  const conceptTop = cursor;
+
+  let svg = '';
+  svg += '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ' +
+    'width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
+  svg += '<defs>';
+  svg += '<linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">' +
+    '<stop offset="0%" stop-color="' + accentA + '"/>' +
+    '<stop offset="100%" stop-color="' + ctx.accentB + '"/></linearGradient>';
+  // Heavy at the top where the headline sits, light through the middle so the
+  // artwork reads, heavy again at the bottom to carry the footer.
+  svg += '<linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0%" stop-color="' + theme.bg0 + '" stop-opacity="0.94"/>' +
+    '<stop offset="38%" stop-color="' + theme.bg0 + '" stop-opacity="0.72"/>' +
+    '<stop offset="62%" stop-color="' + theme.bg0 + '" stop-opacity="0.34"/>' +
+    '<stop offset="100%" stop-color="' + theme.bg0 + '" stop-opacity="0.88"/></linearGradient>';
+  svg += '</defs>';
+
+  // Background: a flat fill first, so a short or transparent image never
+  // leaves bare canvas behind the text.
+  svg += '<rect width="' + W + '" height="' + H + '" fill="' + theme.bg0 + '"/>';
+  svg += '<image x="0" y="0" width="' + W + '" height="' + H + '" ' +
+    'preserveAspectRatio="xMidYMid slice" xlink:href="' + opts.artwork + '"/>';
+  svg += '<rect width="' + W + '" height="' + H + '" fill="url(#scrim)"/>';
+  svg += '<rect x="0" y="0" width="14" height="' + H + '" fill="url(#accent)"/>';
+
+  const label = chipLabel(opts.label || 'Developer Notes', 34).toUpperCase();
+  svg += '<g><rect x="' + PAD + '" y="' + (labelY - 34) + '" width="' +
+    Math.round(measure(label, 26, true) + 44) + '" height="48" rx="24" ' +
+    'fill="' + accentA + '" fill-opacity="0.18" stroke="' + accentA + '" stroke-opacity="0.45"/>';
+  svg += '<text x="' + (PAD + 22) + '" y="' + labelY + '" font-family="' + diagrams.SANS + '" ' +
+    'font-size="26" font-weight="600" letter-spacing="2.4" fill="' + accentA + '">' +
+    escapeXml(label) + '</text></g>';
+
+  titleLines.forEach(function (line, i) {
+    svg += '<text x="' + PAD + '" y="' +
+      (titleTop + (i + 1) * titleLineHeight - Math.round(titleSize * 0.22)) + '" ' +
+      'font-family="' + diagrams.SANS + '" font-size="' + titleSize + '" ' +
+      'font-weight="700" fill="' + theme.fg + '">' + escapeXml(line) + '</text>';
+  });
+
+  svg += '<rect x="' + PAD + '" y="' + ruleY + '" width="170" height="10" rx="5" fill="url(#accent)"/>';
+
+  conceptLines.forEach(function (line, i) {
+    svg += '<text x="' + PAD + '" y="' + (conceptTop + (i + 1) * 50 - 12) + '" ' +
+      'font-family="' + diagrams.SANS + '" font-size="38" ' +
+      'fill="' + theme.fg + '" fill-opacity="0.82">' + escapeXml(line) + '</text>';
+  });
+
+  const footer = chipLabel(opts.footer || '', 60);
+  if (footer) {
+    svg += '<text x="' + PAD + '" y="' + (H - PAD + 18) + '" ' +
+      'font-family="' + diagrams.MONO + '" font-size="26" ' +
+      'fill="' + theme.fg + '" fill-opacity="0.7">' + escapeXml(footer) + '</text>';
+  }
+
+  svg += '</svg>';
+  return svg;
+}
+
+/**
  * Build the poster SVG.
  *
  * @param {object} input
@@ -105,6 +197,10 @@ function stageLabels(points) {
 function buildSvg(input) {
   const opts = input || {};
   const topic = String(opts.topic || 'Untitled').trim();
+  // The writer narrows a broad topic to a specific angle and returns a real
+  // headline for it. That headline is what belongs on the image: a poster
+  // that just says "Java API" tells a reader nothing.
+  const headline = String(opts.title || '').trim() || topic;
   const seedSource = opts.seed || topic;
   const seed = hash32(seedSource);
   const random = makeRandom(seed);
@@ -122,9 +218,17 @@ function buildSvg(input) {
   const PAD = 88;
   const colWidth = W - PAD * 2;
 
+  // Artwork present means the hybrid layout: the art replaces the diagram.
+  if (opts.artwork) {
+    return buildArtSvg(opts, {
+      W: W, H: H, PAD: PAD, colWidth: colWidth,
+      theme: theme, accentA: accentA, accentB: accentB, headline: headline,
+    });
+  }
+
   const label = chipLabel(opts.label || 'Developer Notes', 34).toUpperCase();
-  const titleSize = topic.length > 44 ? 80 : topic.length > 26 ? 94 : 108;
-  const titleLines = wrap(topic, titleSize, colWidth, 3, true);
+  const titleSize = headline.length > 44 ? 80 : headline.length > 26 ? 94 : 108;
+  const titleLines = wrap(headline, titleSize, colWidth, 3, true);
 
   const concept = chipLabel(opts.concept || '', 140);
   let conceptLines = concept ? wrap(concept, 38, colWidth, 2, false) : [];
@@ -145,9 +249,10 @@ function buildSvg(input) {
   let kind = (requested && diagrams.DRAW[requested]) ? requested : '';
   if (!kind) {
     const widen = [
+      headline,
       topic,
-      topic + ' ' + (opts.concept || ''),
-      topic + ' ' + (opts.concept || '') + ' ' +
+      headline + ' ' + topic + ' ' + (opts.concept || ''),
+      headline + ' ' + topic + ' ' + (opts.concept || '') + ' ' +
         (Array.isArray(opts.points) ? opts.points.join(' ') : ''),
     ];
     kind = 'flow';

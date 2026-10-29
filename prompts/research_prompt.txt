@@ -6,7 +6,46 @@ Scheduled date: {{DATE}}
 Research the topic using Google Search grounding when available.
 Prefer primary sources and authoritative technical documentation.
 Do not invent facts.
-Separate evergreen concepts from information that may have changed recently.
+
+════════════════════════════════════════════════════════════════════
+WHAT TO LOOK FOR
+════════════════════════════════════════════════════════════════════
+
+A working engineer is going to write a post from this. They already know
+what the thing is. Definitions are worthless to them.
+
+So do NOT return this:
+
+  "An API in Java is a set of predefined classes and interfaces that
+   allow applications to communicate."
+
+That is a dictionary entry. Nobody learns anything from it, and a post
+built on it reads like a textbook.
+
+Return things with edges — facts that are specific enough to be wrong:
+
+  • MECHANISM. Not that something is slow, but what it does that costs
+    the time. "Each node is a separate allocation, so traversal misses
+    the CPU cache on nearly every hop."
+  • NAMED THINGS. Actual classes, methods, flags, config keys, error
+    messages. "AutoCloseable", "EPERM", "max_connections", "-Xmx".
+  • NUMBERS WITH UNITS. Default values, limits, thresholds, measured
+    differences. Only ones you actually found.
+  • VERSION BOUNDARIES. What changed and in which release. "Before Java 7
+    this needed a finally block; try-with-resources replaced it."
+  • FAILURE MODES. What breaks, the symptom it shows, and the condition
+    that triggers it. These make the best posts.
+  • NON-OBVIOUS CONSTRAINTS. The thing that surprises people who have
+    used it for a year.
+
+If the topic is broad ("Java API", "Databases", "React"), do NOT try to
+summarise the whole field. Find the three or four most specific, most
+surprising things within it and go deep on those. A narrow fact beats a
+broad summary every time.
+
+════════════════════════════════════════════════════════════════════
+OUTPUT
+════════════════════════════════════════════════════════════════════
 
 Return ONLY valid JSON:
 {
@@ -21,9 +60,23 @@ Return ONLY valid JSON:
   ]
 }
 
+key_points carries the weight. Each one should be a complete, specific
+claim that could be argued with — not a topic label. Aim for 5 to 8.
+
+  Weak    "Resource management"
+  Weak    "Arrays are efficient"
+  Strong  "A FileInputStream that is never closed holds the OS file
+           descriptor until the process exits, not until GC runs"
+  Strong  "An index on a column is skipped once you wrap that column in
+           a function, because the stored values no longer match"
+
+practical_example should be a concrete scenario or a short snippet, not
+a description of one.
+
 Rules:
-- Do not copy paragraphs from sources.
-- Paraphrase.
+- Do not copy paragraphs from sources. Paraphrase.
 - Do not fabricate URLs.
+- Every number, version and limit must come from a source you actually
+  read. If you are unsure of a figure, leave it out rather than guess.
 - If no recent update is relevant, return an empty current_updates array.
 - For technical claims, prefer official documentation.

@@ -106,6 +106,17 @@ async function main() {
     record('ok', 'image service reachable at ' + imageUrl);
     if (health.pngRenderer) record('ok', 'PNG renderer ready', 'resvg');
     else record('fail', 'PNG renderer unavailable', health.pngRendererError + ' - LinkedIn will not accept SVG');
+    const provider = health.imageProvider || 'poster';
+    if (provider === 'pollinations' || provider === 'hybrid') {
+      if (health.pollinationsToken) {
+        record('ok', 'artwork: Pollinations with a key', 'no watermark, no rate limit');
+      } else {
+        record('warn', 'artwork: Pollinations without a key',
+          'images carry a Pollinations watermark and are limited to 1 per 45s - get a key at https://enter.pollinations.ai');
+      }
+    } else {
+      record('ok', 'artwork: deterministic diagram poster', 'offline, ~200ms, no watermark');
+    }
     if (health.comfyConfigured) {
       record(health.comfyReachable ? 'ok' : 'warn', 'ComfyUI ' + (health.comfyReachable ? 'reachable' : 'not answering'),
         health.comfyReachable ? '' : 'the deterministic poster will be used instead');

@@ -21,6 +21,7 @@ const { URL } = require('url');
 const poster = require('./lib/poster');
 const render = require('./lib/render');
 const comfy = require('./lib/comfy');
+const pollinations = require('./lib/pollinations');
 
 const HOST = process.env.IMAGE_SERVICE_HOST || '0.0.0.0';
 const PORT = Number(process.env.IMAGE_SERVICE_PORT || 8411);
@@ -30,6 +31,13 @@ const COMFY_URL = process.env.COMFYUI_URL || '';
 const COMFY_ENABLED = String(process.env.COMFYUI_ENABLED || 'false').toLowerCase() === 'true';
 const COMFY_TIMEOUT = Number(process.env.COMFYUI_TIMEOUT_MS || 180000);
 const MAX_BODY = 1024 * 256;
+
+// Hybrid artwork. Default off: the free Pollinations tier ignores `nologo`,
+// so without a key every image carries their watermark. Set a token from
+// https://enter.pollinations.ai and flip IMAGE_PROVIDER to turn it on.
+const IMAGE_PROVIDER = String(process.env.IMAGE_PROVIDER || 'poster').toLowerCase();
+const POLLINATIONS_TOKEN = process.env.POLLINATIONS_TOKEN || '';
+const POLLINATIONS_TIMEOUT = Number(process.env.POLLINATIONS_TIMEOUT_MS || 45000);
 
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
@@ -123,10 +131,41 @@ async function generateImage(input) {
     fallbackReason = 'COMFYUI_URL is not configured';
   }
 
+  // Hybrid path: fetch background artwork and draw the headline over it as
+  // real vector text. Best effort only - any failure drops through to the
+  // deterministic poster below, because a post must never be blocked by a
+  // free third-party service being slow or rate limited.
+  let artwork = null;
+  const wantArt = (IMAGE_PROVIDER === 'pollinations' || IMAGE_PROVIDER === 'hybrid')
+    && !buffer && input.artwork !== false;
+  if (wantArt) {
+    const artPrompt = input.imagePrompt || input.image_prompt
+      || buildComfyPrompt({ topic: topic, concept: input.concept });
+    try {
+      const art = await pollinations.generate({
+        prompt: artPrompt,
+        width: size.width,
+        height: size.height,
+        seed: poster.hash32(input.seed || topic),
+        token: POLLINATIONS_TOKEN,
+        timeoutMs: POLLINATIONS_TIMEOUT,
+      });
+      artwork = 'data:' + art.contentType + ';base64,' + art.buffer.toString('base64');
+      source = art.watermarked ? 'hybrid-watermarked' : 'hybrid';
+      if (art.watermarked) {
+        log('NOTE: Pollinations artwork carries a watermark (no POLLINATIONS_TOKEN set).');
+      }
+    } catch (err) {
+      fallbackReason = err.message;
+      log('Artwork path failed, falling back to the diagram poster:', err.message);
+    }
+  }
+
   let contentType = 'image/png';
   if (!buffer) {
     const svg = poster.buildSvg({
       topic: topic,
+      title: input.title,
       concept: input.concept,
       points: input.points,
       visual: input.visual,
@@ -134,10 +173,11 @@ async function generateImage(input) {
       footer: input.footer,
       format: format,
       seed: input.seed,
+      artwork: artwork,
     });
     if (render.isAvailable()) {
       buffer = render.svgToPng(svg, size.width);
-      source = 'poster-png';
+      if (!artwork) source = 'poster-png';
     } else {
       // Last resort. LinkedIn will not accept SVG, so the caller must treat
       // this as a failure for publishing purposes rather than upload it.
@@ -186,6 +226,8 @@ const server = http.createServer(async function (req, res) {
         posterReady: true,
         pngRenderer: render.isAvailable(),
         pngRendererError: render.unavailableReason(),
+        imageProvider: IMAGE_PROVIDER,
+        pollinationsToken: Boolean(POLLINATIONS_TOKEN),
         comfyConfigured: Boolean(COMFY_URL),
         comfyEnabled: COMFY_ENABLED,
         comfyReachable: comfyReachable,

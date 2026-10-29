@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/acceptance%20tests-76-success.svg)](tests/acceptance.test.js)
+[![Tests](https://img.shields.io/badge/acceptance%20tests-90-success.svg)](tests/acceptance.test.js)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#requirements)
 
 Write a topic in a Google Sheet. At the time you set, it researches that topic,
@@ -104,8 +104,9 @@ run:
    different token comes back, another run won and this one stops.
 4. **Researches** with Gemini using Google Search grounding — it fetches real
    pages, typically 20-30.
-5. **Writes** the post with Gemini, in a second call that can only use what the
-   research found. The writer prompt picks one of five shapes rather than
+5. **Narrows the topic and writes.** Gemini picks one specific angle out of the
+   research, writes a real headline for it, then writes the post — in a second
+   call that can only use what the research found. The writer prompt picks one of five shapes rather than
    filling in a fixed template, and the validator enforces a ban-list of AI
    tells — see [How the writing stays readable](#how-the-writing-stays-readable).
 6. **Validates** — length, topic relevance, no invented URLs, no repeats, and
@@ -146,7 +147,7 @@ npm install
 cd local-image && npm install && cd ..
 
 # 2. Verify everything
-npm test          # expect: 76 passed, 0 failed
+npm test          # expect: 90 passed, 0 failed
 npm run doctor    # checks config, image service, Gemini, LinkedIn
 npm run sheet     # confirms sheet read AND write
 
@@ -346,7 +347,7 @@ days stay missed, by design.
 ## Commands
 
 ```bash
-npm test              # 76 acceptance tests, no network needed
+npm test              # 90 acceptance tests, no network needed
 npm run doctor        # preflight: config, image service, Gemini, LinkedIn
 npm run sheet         # verify sheet read + write
 npm run run           # check what it would do, publish nothing
@@ -421,6 +422,13 @@ day, in the register of a press release.
 
 Three things push against that.
 
+**A broad topic is narrowed before anything is written.** This is the biggest
+lever. "Java API" written as "Java API" produces a definition, and a definition
+teaches a working engineer nothing — they already know what an API is. So the
+writer must first pick one specific angle out of the research and write a real
+headline for it: "Java API" → *"Your file handles are leaking"*. That headline
+is what goes on the image, and it is what the post has to prove.
+
 **The prompt offers shapes, not a template.** The writer picks one of five —
 a correction of a common belief, a walkthrough of one concrete scenario, a
 comparison of two approaches, a surprising number from the research, or a
@@ -444,6 +452,14 @@ deliberately made of multi-word phrases: single words like "robust" and
 A rejected post is not repaired and republished. The row is retried on the next
 run, up to `MAX_ATTEMPTS`.
 
+The gate is only as good as what it has seen. It was widened after a published
+post walked straight through it: the opener *"That weird slowdown in your Java
+app? Sometimes it's a resource leak."* is a rhetorical question, but the check
+tested whether the whole first **line** was a question, and a question answered
+immediately after it is not. It now tests the first **sentence**, and also
+flags the collective "we" register ("we often grab resources, and it's on us to
+close them") — which is how explainer blogs talk, not engineers.
+
 ---
 
 ## Repository layout
@@ -465,13 +481,14 @@ scripts/
 local-image/
   server.js               HTTP image service on :8411
   lib/poster.js           deterministic SVG poster generator
-  lib/diagrams.js         22 topic-aware diagrams + the keyword table
+  lib/diagrams.js         29 topic-aware diagrams + the keyword table
+  lib/pollinations.js     optional free background artwork (no API key)
   lib/svgutil.js          text measuring and wrapping, shared by both
   lib/render.js           SVG to PNG via resvg
   lib/comfy.js            optional ComfyUI client
 apps-script/Code.gs       the sheet's read/write endpoint
 prompts/                  research, writer and image prompts
-tests/acceptance.test.js  76 tests, no network required
+tests/acceptance.test.js  90 tests, no network required
 workflows/                n8n export — optional, not used by default
 ```
 
@@ -499,6 +516,33 @@ linked list. Anything unrecognised gets a neutral three-stage flow diagram.
 A bounds test renders every diagram at two sizes and asserts every rectangle,
 circle, line and arrowhead lands inside its box, so a drawing cannot quietly
 run off the edge of the image.
+
+**The diagram follows the post, not the topic.** The writer names the diagram
+it wants, and detection starts from the generated headline rather than the raw
+topic. This matters: a post about leaking file handles, scheduled under the
+topic "Java API", used to be drawn as a REST client-and-server diagram — correct
+for the word "API", wrong for what the post actually argued.
+
+### Background artwork (optional)
+
+`IMAGE_PROVIDER=pollinations` swaps the diagram for AI-generated background
+artwork from [Pollinations](https://pollinations.ai) — free, no API key — with
+the headline drawn over it as real vector text.
+
+The text is never generated by the model. Image models cannot spell, and a
+garbled word on a published post is worse than no artwork, so the art is always
+abstract and the type is always vector. Every art prompt is suffixed with `no
+text, no words, no letters` for the same reason.
+
+> ⚠️ **Anonymous use carries a watermark.** The free tier ignores `nologo` and
+> is limited to one image every 45 seconds per IP, so images come back marked
+> `pollinations.ai`. A key from [enter.pollinations.ai](https://enter.pollinations.ai)
+> removes it — set `POLLINATIONS_TOKEN`. This is why the default stays
+> `poster`: a third-party watermark on your own posts is worse than a diagram.
+
+The path is best effort. A timeout, a rate limit, or anything that is not real
+image bytes falls through to the deterministic poster, so a free third-party
+service can never stop a post going out.
 
 **Why not AI image generation?** Gemini's image models have no free tier — paid
 on every tier. A GPU-based local model (ComfyUI) is wired up and enabled with
@@ -583,7 +627,7 @@ prevention.
 ```bash
 npm install
 cd local-image && npm install && cd ..
-npm test          # 76 tests, no credentials or network needed
+npm test          # 90 tests, no credentials or network needed
 ```
 
 Two things to know before opening a pull request:

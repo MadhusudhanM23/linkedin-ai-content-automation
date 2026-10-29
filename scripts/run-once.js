@@ -259,7 +259,10 @@ async function main() {
       strictUrls: !r1.grounded,
     });
     if (!post.ok) throw new Error('Post rejected: ' + post.errors.join('; '));
-    log('wrote post via ' + r2.provider + ': ' + post.post.length + ' chars');
+    log('wrote post via ' + r2.provider + ': ' + post.post.length + ' chars'
+      + (post.post.title ? ' - "' + post.post.title + '"' : '')
+      + (post.post.visual ? ' [' + post.post.visual + ']' : ''));
+    for (const w of post.warnings) log('  note: ' + w);
 
     // -- image -----------------------------------------------------------
     const imgBase = (env.IMAGE_SERVICE_URL || 'http://127.0.0.1:8411').replace('host.docker.internal', '127.0.0.1');
@@ -271,6 +274,8 @@ async function main() {
         topic: row.topic,
         concept: post.post.imageConcept,
         visual: post.post.visual,
+        title: post.post.title,
+        imagePrompt: post.post.imagePrompt,
         points: research.data.key_points.slice(0, 3),
         label: 'Developer Notes',
         footer: String(row.dateRaw),

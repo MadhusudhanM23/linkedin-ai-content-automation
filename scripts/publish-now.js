@@ -141,6 +141,8 @@ async function main() {
       topic: TOPIC,
       concept: post.post.imageConcept,
       visual: post.post.visual,
+      title: post.post.title,
+      imagePrompt: post.post.imagePrompt,
       points: research.data.key_points.slice(0, 3),
       label: 'Developer Notes',
       footer: new Date().toLocaleDateString('en-GB'),

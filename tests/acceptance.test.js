@@ -845,6 +845,152 @@ test('The poster still renders for every diagram kind', () => {
   }
 });
 
+
+section('Voice gate - second pass');
+
+test('A question answered immediately still counts as a rhetorical opener', () => {
+  const v = require('../lib/validate');
+  // This is the opener from a post that actually published: the old check
+  // tested the whole first LINE, so a question plus its answer slipped past.
+  const tells = v.findTells(
+    "That weird slowdown in your Java app? Sometimes it's a resource leak.\n\n"
+    + 'The descriptor stays open until the process exits.');
+  assert.ok(tells.structural.some((t) => t.includes('rhetorical question')),
+    'question-then-answer opener was not caught');
+});
+
+test('A first line that is a statement is not flagged', () => {
+  const v = require('../lib/validate');
+  const tells = v.findTells('A FileInputStream you never close holds the descriptor until exit.\n\nThat is the bug.');
+  assert.strictEqual(tells.structural.length, 0);
+});
+
+test('The collective "we" register is caught', () => {
+  const v = require('../lib/validate');
+  const heavy = v.findTells('We often grab resources, and it is on us to close them. '
+    + 'We forget, so our handles leak, and we only notice when we run out. Let us look at why.');
+  assert.ok(heavy.structural.some((t) => t.includes('collective')), 'heavy "we" use should block');
+  const light = v.findTells('We can measure this. The descriptor stays open until the process exits.');
+  assert.strictEqual(light.structural.length, 0, 'occasional "we" must stay allowed');
+});
+
+test('Explainer-blog filler is banned', () => {
+  const v = require('../lib/validate');
+  for (const phrase of ['In a nutshell', 'The good news is', 'Simply put', 'Long story short']) {
+    const tells = v.findTells(phrase + ', the descriptor leaks.');
+    assert.ok(tells.banned.length > 0, 'expected "' + phrase + '" to be banned');
+  }
+});
+
+test('The writer headline and image prompt survive validation', () => {
+  const v = require('../lib/validate');
+  const body = 'A FileInputStream you never close holds the OS descriptor until the process exits.\n\n'
+    + 'Garbage collection does not help here. The object may be collected while the '
+    + 'underlying descriptor stays open, because closing is not something the collector '
+    + 'promises to do for you.\n\n'
+    + 'Run out of descriptors and every new socket fails, not just file reads.';
+  const res = v.validatePost(JSON.stringify({
+    post: body,
+    hashtags: ['#Java'],
+    title: 'Your file handles are leaking',
+    visual: 'resource',
+    image_prompt: 'dark fluid draining through a narrow channel',
+  }), 'file', {});
+  assert.ok(res.ok, 'should publish: ' + res.errors.join('; '));
+  assert.strictEqual(res.post.title, 'Your file handles are leaking');
+  assert.strictEqual(res.post.visual, 'resource');
+  assert.strictEqual(res.post.imagePrompt, 'dark fluid draining through a narrow channel');
+});
+
+section('Headline and hybrid artwork');
+
+test('The generated headline replaces the raw topic on the poster', () => {
+  const poster = require('../local-image/lib/poster');
+  const svg = poster.buildSvg({ topic: 'Java API', title: 'Your file handles are leaking' });
+  assert.ok(svg.includes('Your file handles'), 'headline missing from the poster');
+  assert.ok(!/font-size="(8\d|9\d|10\d)" font-weight="700"[^>]*>Java API</.test(svg),
+    'the raw topic should not be the headline when a title is given');
+});
+
+test('The headline drives diagram choice, so a vague topic cannot mislead it', () => {
+  const poster = require('../local-image/lib/poster');
+  // Topic "Java API" alone would pick the REST client/server diagram, which is
+  // not what a post about leaking descriptors is arguing.
+  const svg = poster.buildSvg({ topic: 'Java API', title: 'Your file handles are leaking' });
+  assert.ok(svg.includes('still held'), 'expected the resource diagram');
+  assert.ok(!svg.includes('GET /users/42'), 'drew the api diagram instead');
+});
+
+test('Artwork switches the poster to the hybrid layout', () => {
+  const poster = require('../local-image/lib/poster');
+  const uri = 'data:image/png;base64,iVBORw0KGgo=';
+  const svg = poster.buildSvg({
+    topic: 'Java API',
+    title: 'Your file handles are leaking',
+    concept: 'A missed close starves the OS',
+    artwork: uri,
+  });
+  assert.ok(svg.includes('<image'), 'artwork was not embedded');
+  assert.ok(svg.includes(uri), 'the data URI is missing');
+  assert.ok(svg.includes('Your file handles'), 'the headline must still be vector text');
+  // The art replaces the diagram; no diagram caption should survive.
+  assert.ok(!svg.includes('Miss the close and the handle'), 'diagram leaked into the hybrid layout');
+});
+
+test('The hybrid layout still produces well-formed SVG', () => {
+  const poster = require('../local-image/lib/poster');
+  const svg = poster.buildSvg({
+    topic: 'A fairly long topic that will need to wrap across lines',
+    title: 'A fairly long generated headline that also has to wrap',
+    concept: 'An explanatory line beneath the headline',
+    footer: '29/10/2026',
+    artwork: 'data:image/jpeg;base64,/9j/4AAQ',
+  });
+  assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>'));
+  assert.ok(!/<text[^>]*>[^<]*<(?!\/text)/.test(svg), 'markup leaked into a text node');
+});
+
+section('Pollinations client');
+
+test('Every art prompt forbids text, so the model never tries to spell', () => {
+  const p = require('../local-image/lib/pollinations');
+  const built = p.buildPrompt('dark fluid draining through a channel');
+  assert.ok(built.includes('no text'), 'prompt must forbid text');
+  assert.ok(built.includes('no words') && built.includes('no letters'));
+  assert.throws(() => p.buildPrompt('   '), /empty prompt/);
+});
+
+test('The request URL is encoded and carries a deterministic seed', () => {
+  const p = require('../local-image/lib/pollinations');
+  const url = p.buildUrl('a prompt with spaces & symbols', { seed: 1234, width: 800, height: 800 });
+  assert.ok(url.startsWith('https://image.pollinations.ai/prompt/'));
+  assert.ok(!url.includes(' '), 'the prompt must be URL encoded');
+  assert.ok(url.includes('seed=1234'));
+  assert.ok(url.includes('width=800'));
+  const again = p.buildUrl('a prompt with spaces & symbols', { seed: 1234, width: 800, height: 800 });
+  assert.strictEqual(url, again, 'the same input must produce the same URL');
+});
+
+test('Only real image bytes are accepted, so an error page cannot be published', () => {
+  const p = require('../local-image/lib/pollinations');
+  assert.strictEqual(p.imageKind(Buffer.from('89504e470d0a1a0a', 'hex')), 'image/png');
+  assert.strictEqual(p.imageKind(Buffer.from('ffd8ffe000104a46', 'hex')), 'image/jpeg');
+  assert.strictEqual(p.imageKind(Buffer.from('{"error":"rate limited"}', 'utf8')), null);
+  assert.strictEqual(p.imageKind(Buffer.alloc(0)), null);
+});
+
+section('Mechanism diagrams');
+
+test('A mechanism in the headline beats a broad topic word', () => {
+  const d = require('../local-image/lib/diagrams');
+  assert.strictEqual(d.detect('Your file handles are leaking'), 'resource');
+  assert.strictEqual(d.detect('try-with-resources is not sugar'), 'resource');
+  assert.strictEqual(d.detect('Your catch block is swallowing the cause'), 'exception');
+  assert.strictEqual(d.detect('Heap pressure and garbage collection'), 'memory');
+  assert.strictEqual(d.detect('Sizing your thread pool'), 'threadpool');
+  assert.strictEqual(d.detect('Connection pool exhaustion'), 'connpool');
+});
+
 // ===========================================================================
 console.log('\n' + '='.repeat(60));
 console.log(passed + ' passed, ' + failed + ' failed');

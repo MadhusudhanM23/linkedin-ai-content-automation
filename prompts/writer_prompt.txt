@@ -103,12 +103,57 @@ Closing clichés:
   "Drop a comment"                          "Like and share"
 
 Structural tells:
-  • Opening with a rhetorical question.
+  • Opening with a rhetorical question — including one you answer
+    immediately. "That weird slowdown in your app? It's a resource leak."
+    is exactly this move. Just state the thing.
+  • The collective "we". "We often grab resources... it's on us to close
+    them." Nobody talks like this except explainer blogs. Say "you", or
+    better, name the actor: "the JVM", "the driver", "your code".
   • "It's not just X, it's Y" and "X isn't about Y. It's about Z."
   • A row of emoji, or emoji used as bullet points.
   • More than one em-dash (—) in the whole post. Use full stops.
   • Ending on a neat inversion of the opening line.
   • Telling the reader they are doing it wrong.
+
+════════════════════════════════════════════════════════════════════
+FIRST: NARROW THE TOPIC
+════════════════════════════════════════════════════════════════════
+
+The topic you are given may be broad — "Java API", "React", "Databases".
+A broad topic written broadly produces a definition, and a definition is
+worthless to a working engineer. They already know what an API is.
+
+So before you write anything, pick ONE specific, concrete angle out of the
+research, and commit to it completely.
+
+  "Java API"      → not "what an API is"
+                  → "why a missed close() starves the OS of file handles"
+
+  "Databases"     → not "databases store data"
+                  → "why your index stops being used when you wrap the
+                     column in a function"
+
+  "React"         → not "React is a UI library"
+                  → "why a new object in props re-renders a memoised child"
+
+Rules for the angle:
+  • It must be something a mid-level engineer could get wrong.
+  • It must come from the research, not from your general knowledge.
+  • It must be narrow enough to prove in 1,200 characters.
+  • If the research only supports a definition, pick the most surprising
+    detail in it and build on that instead.
+
+Then write "title": a real headline for THAT angle. Not the topic again.
+
+  Bad   "Java API"            (that is the topic, not a headline)
+  Bad   "Understanding the Java API"
+  Bad   "Java API: A Deep Dive"
+  Good  "Your file handles are leaking"
+  Good  "The index you added is being ignored"
+  Good  "try-with-resources is not just syntax sugar"   ← still bad, see BANNED
+
+Two to six words. Concrete. No colon restating the topic. This headline is
+printed on the image, so it has to make sense on its own.
 
 ════════════════════════════════════════════════════════════════════
 SHAPE — pick ONE, do not blend them
@@ -174,8 +219,12 @@ HARD LIMITS — enforced by a validator, violations are not published
 THE IMAGE
 ════════════════════════════════════════════════════════════════════
 
-A diagram is generated locally from the "visual" field. Pick the one that
-draws the thing your post is actually about:
+Two fields drive the picture. Fill in both.
+
+"visual" picks a diagram that is drawn locally, in code. Choose the one
+that draws what YOUR POST argues, not what the topic is called. A post
+about leaking file handles is a "resource" post even though the topic
+said "Java API". Pick on the mechanism you explained:
 
   array        indexed cells, one highlighted
   linkedlist   nodes and next-pointers, ending in null
@@ -198,7 +247,32 @@ draws the thing your post is actually about:
   concurrency  thread lanes overlapping in time, with a lock
   git          a branch diverging from main and merging back
   container    one host, three isolated apps
+  resource     acquire -> use -> close, with the leaked path marked
+  exception    try / catch / finally control flow
+  memory       heap regions filling and being collected
+  threadpool   a pool of workers pulling from a task queue
+  connpool     connections checked out of a pool and returned
+  stream       a value passing through pipeline operations
+  collections  two collection types with their cost per operation
   flow         a neutral three-stage diagram — use only if nothing else fits
+
+"image_prompt" describes background artwork, generated separately. It sits
+BEHIND the headline, which is drawn as real text on top, so:
+
+  • Describe mood, texture, colour and an abstract subject. Nothing else.
+  • NEVER ask for text, words, letters, numbers, labels, UI or code. The
+    generator cannot spell, and anything it writes comes out as nonsense.
+  • NEVER ask for people, faces, hands, logos or brands.
+  • Keep it dark and low-contrast — bright busy art makes the headline
+    unreadable on top of it.
+  • Tie it to the mechanism, loosely. A leak post might be "dark fluid
+    draining through a narrow aperture". An index post might be
+    "converging light paths finding one point in a lattice".
+
+  Example: "abstract dark visualisation of fluid draining away through a
+  narrow channel, deep indigo and dim amber, volumetric light, heavy
+  negative space in the upper half, cinematic, photorealistic texture,
+  no text, no words, no people" 
 
 ════════════════════════════════════════════════════════════════════
 OUTPUT
@@ -207,10 +281,12 @@ OUTPUT
 Return ONLY this JSON. No prose, no code fence around it.
 
 {
+  "title": "2-6 word headline for the angle you chose, printed on the image",
   "hook": "the opening line or two, repeated from the post",
   "post": "the complete post, plain text, no markdown, no hashtags",
   "hashtags": ["#DSA", "#Algorithms", "#SoftwareEngineering"],
   "visual": "one id from the list above",
   "image_concept": "one short sentence naming the single visual idea",
+  "image_prompt": "see THE IMAGE above - subject and mood only, no text",
   "source_urls": ["only urls that appear in the research sources"]
 }

@@ -91,6 +91,15 @@ function caption(value, cx, y, muted) {
  * higher, so "binary search tree" beats a bare "search".
  */
 const RULES = [
+  // Listed first so a specific mechanism beats a broad topic word: a post
+  // about leaking file handles is a "resource" post even if it says "API".
+  ['resource', ['try-with-resources', 'resource leak', 'autocloseable', 'file handle', 'file descriptor', 'close()', 'releasing resources', 'resource management', 'leaked connection']],
+  ['exception', ['exception', 'try-catch', 'try/catch', 'checked exception', 'unchecked exception', 'stack trace', 'throw', 'error handling', 'finally block', 'catch block', 'swallow']],
+  ['memory', ['garbage collect', 'garbage collection', 'heap', 'memory leak', 'out of memory', 'allocation', 'jvm memory', 'young generation', 'old generation']],
+  ['threadpool', ['thread pool', 'threadpool', 'executor', 'worker pool', 'task queue', 'fixed pool']],
+  ['connpool', ['connection pool', 'hikari', 'datasource', 'pool size', 'connection limit']],
+  ['stream', ['stream api', 'lazy evaluation', 'map and filter', 'terminal operation', 'intermediate operation', 'pipeline operation']],
+  ['collections', ['arraylist', 'hashset', 'treemap', 'list vs set', 'collection framework', 'which collection']],
   ['bigo', ['time complexity', 'space complexity', 'big o', 'big-o', 'o(n)', 'o(1)', 'o(log', 'complexity', 'asymptotic', 'amortized']],
   ['twopointer', ['two pointer', 'two-pointer', 'sliding window', 'fast and slow', 'left and right pointer']],
   ['binsearch', ['binary search', 'bisect', 'lower bound', 'upper bound', 'divide and conquer']],
@@ -806,6 +815,204 @@ DRAW.flow = function (c) {
       { opacity: hot ? 1 : 0.9 });
     if (i < n - 1) svg += arrow(x + bw + 8, y + bh / 2, x + bw + gap - 8, y + bh / 2, c.b, 3.6);
   }
+  return svg;
+};
+
+DRAW.resource = function (c) {
+  const gap = 40;
+  const bw = Math.min(250, (c.w - gap * 2) / 3);
+  const bh = 110;
+  const total = bw * 3 + gap * 2;
+  const sx = c.x + (c.w - total) / 2;
+  const y = c.y + 34;
+  const names = ['open()', 'use', 'close()'];
+  let svg = '';
+  for (let i = 0; i < 3; i++) {
+    const x = sx + i * (bw + gap);
+    const hot = i === 2;
+    svg += box(x, y, bw, bh, hot ? c.a : c.panel, hot ? c.a : c.fg, 14,
+      { fillOpacity: hot ? 0.2 : 0.9, strokeOpacity: hot ? 0.85 : 0.16 });
+    svg += centred(names[i], x + bw / 2, y + bh / 2, bw - 20, 32, hot ? c.a : c.fg, { mono: true });
+    if (i < 2) svg += arrow(x + bw + 6, y + bh / 2, x + bw + gap - 6, y + bh / 2, c.b, 3.4);
+  }
+  // The path that skips close(): this is the bug the post is about.
+  const leakY = y + bh + 96;
+  const midX = sx + bw + gap + bw / 2;
+  const leakW = Math.min(300, c.w * 0.3);
+  svg += box(midX - leakW / 2, leakY, leakW, 76, c.panel, c.a, 14,
+    { fillOpacity: 0.55, strokeOpacity: 0.8, dash: '9 7' });
+  svg += centred('still held', midX, leakY + 38, leakW - 20, 28, c.a);
+  svg += arrow(midX, y + bh + 8, midX, leakY - 10, c.a, 3.2, 0.8);
+  svg += txt('no close', midX + 16, (y + bh + leakY) / 2 + 8, 25, c.a, { weight: 700 });
+  svg += caption('Miss the close and the handle never comes back',
+    c.x + c.w / 2, c.y + c.h - 8, c.muted);
+  return svg;
+};
+
+DRAW.exception = function (c) {
+  const gap = 46;
+  const bw = Math.min(250, (c.w - gap * 2) / 3);
+  const bh = 116;
+  const total = bw * 3 + gap * 2;
+  const sx = c.x + (c.w - total) / 2;
+  const y = c.y + 86;
+  const names = ['try', 'catch', 'finally'];
+  let svg = '';
+  for (let i = 0; i < 3; i++) {
+    const x = sx + i * (bw + gap);
+    const hot = i === 2;
+    svg += box(x, y, bw, bh, hot ? c.a : c.panel, hot ? c.a : c.fg, 14,
+      { fillOpacity: hot ? 0.2 : 0.9, strokeOpacity: hot ? 0.85 : 0.16 });
+    svg += centred(names[i], x + bw / 2, y + bh / 2, bw - 20, 34, hot ? c.a : c.fg, { mono: true });
+  }
+  const x1 = sx + bw;
+  const x2 = sx + bw + gap;
+  svg += arrow(x1 + 6, y + bh / 2, x2 - 6, y + bh / 2, c.a, 3.4);
+  svg += txt('throws', (x1 + x2) / 2, y + bh / 2 + 44, 25, c.a, { anchor: 'middle', weight: 700 });
+  svg += arrow(x2 + bw + 6, y + bh / 2, x2 + bw + gap - 6, y + bh / 2, c.b, 3.4);
+  // The no-error path arcs over catch straight into finally.
+  const topY = y - 54;
+  svg += '<path d="M ' + r(sx + bw / 2) + ' ' + r(y) + ' C ' + r(sx + bw / 2) + ' ' + r(topY) +
+    ', ' + r(sx + 2 * (bw + gap) + bw / 2) + ' ' + r(topY) + ', ' +
+    r(sx + 2 * (bw + gap) + bw / 2) + ' ' + r(y) + '" fill="none" stroke="' + c.b +
+    '" stroke-width="3.2" stroke-opacity="0.75"/>';
+  svg += txt('no error', (sx + bw / 2 + sx + 2 * (bw + gap) + bw / 2) / 2, topY - 12, 25, c.b,
+    { anchor: 'middle', weight: 700 });
+  svg += caption('finally runs on both paths — that is the whole point',
+    c.x + c.w / 2, c.y + c.h - 8, c.muted);
+  return svg;
+};
+
+DRAW.memory = function (c) {
+  const barW = Math.min(c.w - 40, 960);
+  const sx = c.x + (c.w - barW) / 2;
+  const y = c.y + 92;
+  const bh = 128;
+  const regions = [['eden', 0.42, 0.85], ['survivor', 0.16, 0.5], ['old gen', 0.42, 0.3]];
+  let svg = '';
+  let cursor = sx;
+  for (const reg of regions) {
+    const w = barW * reg[1];
+    svg += box(cursor, y, w, bh, c.panel, c.fg, 12, { fillOpacity: 0.85, strokeOpacity: 0.14 });
+    svg += box(cursor + 6, y + bh - 6 - (bh - 12) * reg[2], w - 12, (bh - 12) * reg[2],
+      c.a, null, 8, { fillOpacity: 0.55 });
+    svg += txt(reg[0], cursor + w / 2, y + bh + 36, 25, c.muted,
+      { anchor: 'middle', weight: 600, mono: true });
+    cursor += w;
+  }
+  svg += arrow(sx + barW * 0.2, y - 56, sx + barW * 0.2, y - 12, c.b, 3.4);
+  svg += txt('allocate', sx + barW * 0.2, y - 66, 26, c.b, { anchor: 'middle', weight: 700 });
+  svg += arrow(sx + barW * 0.62, y - 12, sx + barW * 0.62, y - 56, c.a, 3.4);
+  svg += txt('GC reclaims', sx + barW * 0.62, y - 66, 26, c.a, { anchor: 'middle', weight: 700 });
+  svg += caption('A leak is memory the collector is not allowed to free',
+    c.x + c.w / 2, c.y + c.h - 8, c.muted);
+  return svg;
+};
+
+DRAW.threadpool = function (c) {
+  const qW = Math.min(210, c.w * 0.21);
+  const qx = c.x + 10;
+  const y = c.y + 40;
+  const slotH = 54;
+  let svg = '';
+  for (let i = 0; i < 4; i++) {
+    svg += box(qx, y + i * (slotH + 10), qW, slotH, c.panel, c.fg, 10,
+      { fillOpacity: 0.88, strokeOpacity: 0.14 });
+    svg += centred('task', qx + qW / 2, y + i * (slotH + 10) + slotH / 2, qW - 20, 26, c.fg,
+      { opacity: 0.8, mono: true });
+  }
+  svg += txt('queue', qx + qW / 2, y - 14, 26, c.muted, { anchor: 'middle', weight: 700 });
+
+  const pw = Math.min(360, c.w * 0.36);
+  const px = c.x + c.w - pw - 10;
+  const ph = 4 * (slotH + 10) - 10;
+  svg += box(px, y, pw, ph, c.panel, c.a, 16, { fillOpacity: 0.4, strokeOpacity: 0.7, dash: '10 8' });
+  svg += txt('pool of 3', px + pw / 2, y - 14, 26, c.a, { anchor: 'middle', weight: 700 });
+  for (let i = 0; i < 3; i++) {
+    const cy = y + 46 + i * ((ph - 70) / 2);
+    svg += dot(px + pw / 2, cy, 26, c.a, 0.85);
+  }
+  svg += arrow(qx + qW + 12, y + ph / 2, px - 12, y + ph / 2, c.b, 3.6);
+  svg += caption('Tasks wait. The pool size is the real concurrency limit.',
+    c.x + c.w / 2, c.y + c.h - 8, c.muted);
+  return svg;
+};
+
+DRAW.connpool = function (c) {
+  const pw = Math.min(420, c.w * 0.42);
+  const px = c.x + 10;
+  const y = c.y + 48;
+  const ph = Math.min(240, c.h - 150);
+  let svg = box(px, y, pw, ph, c.panel, c.fg, 16, { fillOpacity: 0.5, strokeOpacity: 0.2, dash: '10 8' });
+  svg += txt('pool', px + 18, y + 34, 26, c.muted, { weight: 700 });
+  const slotW = (pw - 60) / 4;
+  for (let i = 0; i < 4; i++) {
+    const inUse = i < 2;
+    svg += box(px + 24 + i * (slotW + 4), y + 54, slotW - 4, ph - 86,
+      inUse ? c.a : c.panel, inUse ? c.a : c.fg, 10,
+      { fillOpacity: inUse ? 0.24 : 0.9, strokeOpacity: inUse ? 0.85 : 0.12 });
+  }
+  const dw = Math.min(250, c.w * 0.25);
+  const dx = c.x + c.w - dw - 10;
+  svg += box(dx, y + ph / 2 - 55, dw, 110, c.b, c.b, 14, { fillOpacity: 0.18, strokeOpacity: 0.75 });
+  svg += centred('database', dx + dw / 2, y + ph / 2, dw - 20, 30, c.b);
+  svg += arrow(px + pw + 12, y + ph / 2, dx - 12, y + ph / 2, c.a, 3.6);
+  svg += txt('2 of 4 in use', px + pw / 2, y + ph + 38, 26, c.a, { anchor: 'middle', weight: 700 });
+  svg += caption('Run out and every request waits for someone to give one back',
+    c.x + c.w / 2, c.y + c.h - 8, c.muted);
+  return svg;
+};
+
+DRAW.stream = function (c) {
+  const stages = ['source', 'map', 'filter', 'collect'];
+  const gap = 24;
+  const bw = (c.w - gap * (stages.length - 1)) / stages.length;
+  const bh = 120;
+  const y = c.y + (c.h - 90 - bh) / 2;
+  let svg = '';
+  for (let i = 0; i < stages.length; i++) {
+    const x = c.x + i * (bw + gap);
+    const terminal = i === stages.length - 1;
+    svg += box(x, y, bw, bh, terminal ? c.a : c.panel, terminal ? c.a : c.fg, 14,
+      { fillOpacity: terminal ? 0.22 : 0.9, strokeOpacity: terminal ? 0.85 : 0.15 });
+    svg += centred(stages[i], x + bw / 2, y + bh / 2, bw - 18, 30, terminal ? c.a : c.fg, { mono: true });
+    if (i < stages.length - 1) {
+      svg += arrow(x + bw + 4, y + bh / 2, x + bw + gap - 4, y + bh / 2, c.b, 3.2);
+    }
+  }
+  svg += txt('lazy — nothing runs yet', c.x + bw * 1.5 + gap, y - 18, 25, c.muted,
+    { anchor: 'middle', weight: 600, opacity: 0.8 });
+  svg += txt('runs here', c.x + 3 * (bw + gap) + bw / 2, y + bh + 40, 26, c.a,
+    { anchor: 'middle', weight: 700 });
+  svg += caption('Nothing is evaluated until the terminal operation asks',
+    c.x + c.w / 2, c.y + c.h - 8, c.muted);
+  return svg;
+};
+
+DRAW.collections = function (c) {
+  const rowH = 96;
+  const y = c.y + 56;
+  const labelW = Math.min(300, c.w * 0.3);
+  const cellW = (c.w - labelW - 20) / 2;
+  const rows = [['ArrayList', 'get O(1)', 'insert O(n)'], ['LinkedList', 'get O(n)', 'insert O(1)']];
+  let svg = '';
+  svg += txt('read', labelW + c.x + cellW / 2, y - 18, 26, c.muted, { anchor: 'middle', weight: 700 });
+  svg += txt('insert', labelW + c.x + cellW + cellW / 2, y - 18, 26, c.muted, { anchor: 'middle', weight: 700 });
+  for (let i = 0; i < rows.length; i++) {
+    const ry = y + i * (rowH + 16);
+    svg += txt(rows[i][0], c.x + 8, ry + rowH / 2 + 10, 30, c.fg, { weight: 700 });
+    for (let j = 0; j < 2; j++) {
+      const x = c.x + labelW + 10 + j * cellW;
+      // The cheap operation in each row is the one worth highlighting.
+      const hot = (i === 0 && j === 0) || (i === 1 && j === 1);
+      svg += box(x, ry, cellW - 10, rowH, hot ? c.a : c.panel, hot ? c.a : c.fg, 12,
+        { fillOpacity: hot ? 0.22 : 0.85, strokeOpacity: hot ? 0.85 : 0.1 });
+      svg += centred(rows[i][j + 1], x + (cellW - 10) / 2, ry + rowH / 2, cellW - 30, 28,
+        hot ? c.a : c.fg, { mono: true, opacity: hot ? 1 : 0.75 });
+    }
+  }
+  svg += caption('Pick by the operation you do most, not the name',
+    c.x + c.w / 2, c.y + c.h - 8, c.muted);
   return svg;
 };
 
