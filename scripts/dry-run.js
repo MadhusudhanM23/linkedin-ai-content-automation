@@ -116,20 +116,16 @@ async function main() {
 
   // --- Stage 2: write -----------------------------------------------------
   rule('2. GEMINI WRITER');
-  const writerPrompt =
-    'You are a professional LinkedIn technical-content writer.\n\nTopic:\n' + TOPIC +
-    '\n\nResearch:\n' + JSON.stringify(researchResult.data) +
-    '\n\nCreate an original LinkedIn post for a software developer audience.\n\n' +
-    'Style:\n- Clear and human.\n- Practical, not corporate.\n- Strong opening hook.\n' +
-    '- Teach one useful concept.\n- Include a small example where appropriate.\n' +
-    '- Avoid fake personal experiences.\n- Avoid unsupported statistics.\n- Avoid clickbait.\n' +
-    '- Avoid engagement bait unless natural.\n- Use short paragraphs.\n' +
-    '- Use code blocks only when they materially help.\n- Add 3-6 relevant hashtags.\n' +
-    '- Do not claim the author personally built or tested something unless given as fact.\n\n' +
-    'Hard constraints enforced downstream:\n' +
-    '- The post body must be between 180 and 2900 characters before hashtags.\n' +
-    '- Do not put any URL in post unless that exact URL appears in the research sources.\n\n' +
-    'Return ONLY JSON with keys: hook, post, hashtags, image_concept, source_urls.';
+  // Same prompt file the scheduler uses, so a dry run previews what will
+  // actually publish rather than a separate, drifting copy of the rules.
+  const minWords = Number(env.POST_MIN_WORDS) > 0 ? Number(env.POST_MIN_WORDS) : validate.DEFAULT_MIN_WORDS;
+  const maxWords = Number(env.POST_MAX_WORDS) > 0 ? Number(env.POST_MAX_WORDS) : validate.DEFAULT_MAX_WORDS;
+  const writerPrompt = fs.readFileSync(path.join(ROOT, 'prompts', 'writer_prompt.txt'), 'utf8')
+    .replace(/\{\{TOPIC\}\}/g, TOPIC)
+    .replace(/\{\{RESEARCH_JSON\}\}/g, JSON.stringify(researchResult.data))
+    .replace(/\{\{MIN_WORDS\}\}/g, String(minWords))
+    .replace(/\{\{MAX_WORDS\}\}/g, String(maxWords))
+    .replace(/\{\{TARGET_WORDS\}\}/g, String(Math.round(maxWords * 0.8)));
 
   const writerRaw = await gemini(env.GEMINI_MODEL || 'gemini-2.5-flash', {
     contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],
@@ -140,6 +136,8 @@ async function main() {
     researchUrls: researchUrls,
     previousHashes: [],
     sha256: sha256,
+    minWords: minWords,
+    maxWords: maxWords,
   });
 
   rule('3. VALIDATION');

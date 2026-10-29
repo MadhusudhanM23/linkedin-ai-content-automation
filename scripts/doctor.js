@@ -186,6 +186,27 @@ async function main() {
     }
   }
 
+  // --- Claude fallback --------------------------------------------------
+  // A fallback that cannot authenticate is worse than none: it fails only
+  // when Gemini is already down, which is exactly when nobody is watching.
+  console.log('\nClaude fallback (paid, only used when Gemini fails)');
+  if (!env.ANTHROPIC_API_KEY) {
+    record('ok', 'ANTHROPIC_API_KEY not set', 'no paid fallback; a Gemini outage retries without search, then waits');
+  } else {
+    try {
+      // GET /v1/models validates the key without spending a token.
+      const res = await probe('https://api.anthropic.com/v1/models', {
+        method: 'GET',
+        headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      }, 8000);
+      if (res.status === 200) record('ok', 'Anthropic key works', env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001');
+      else if (res.status === 401) record('fail', 'Anthropic key REJECTED (401)', 'the fallback cannot run - fix or clear ANTHROPIC_API_KEY in .env');
+      else record('warn', 'Anthropic API answered HTTP ' + res.status, 'could not confirm the key');
+    } catch (err) {
+      record('warn', 'Anthropic API unreachable', String(err.message).slice(0, 80));
+    }
+  }
+
   // --- LinkedIn -------------------------------------------------------
   console.log('\nLinkedIn');
   if (!env.LINKEDIN_ACCESS_TOKEN) {

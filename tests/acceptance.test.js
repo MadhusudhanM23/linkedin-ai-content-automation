@@ -888,7 +888,8 @@ test('The writer headline and image prompt survive validation', () => {
     + 'Garbage collection does not help here. The object may be collected while the '
     + 'underlying descriptor stays open, because closing is not something the collector '
     + 'promises to do for you.\n\n'
-    + 'Run out of descriptors and every new socket fails, not just file reads.';
+    + 'Run out of descriptors and every new socket fails, not just file reads. '
+    + 'The default limit on most Linux boxes is 1024 per process, and it is easy to hit.';
   const res = v.validatePost(JSON.stringify({
     post: body,
     hashtags: ['#Java'],
@@ -989,6 +990,56 @@ test('A mechanism in the headline beats a broad topic word', () => {
   assert.strictEqual(d.detect('Heap pressure and garbage collection'), 'memory');
   assert.strictEqual(d.detect('Sizing your thread pool'), 'threadpool');
   assert.strictEqual(d.detect('Connection pool exhaustion'), 'connpool');
+});
+
+
+section('Word budget');
+
+test('A post over the word limit is rejected, not trimmed', () => {
+  const v = require('../lib/validate');
+  const body = 'The descriptor stays open until the process exits. '.repeat(40); // ~360 words
+  const res = v.validatePost(JSON.stringify({ post: body, hashtags: ['#Java'] }), 'descriptor', {});
+  assert.ok(!res.ok);
+  assert.ok(res.errors.some((e) => /words; the limit is 150/.test(e)), res.errors.join('; '));
+  assert.strictEqual(res.post.body, body.trim(), 'the body must come back untouched, not cut to fit');
+});
+
+test('A post under the minimum is rejected as too thin', () => {
+  const v = require('../lib/validate');
+  // Long enough in characters to clear MIN_POST_LENGTH, so only the word rule fires.
+  const body = 'Descriptors: ' + 'x'.repeat(220);
+  const res = v.validatePost(JSON.stringify({ post: body, hashtags: ['#Java'] }), 'descriptor', {});
+  assert.ok(res.errors.some((e) => /only \d+ words; at least 60/.test(e)), res.errors.join('; '));
+});
+
+test('Hashtags do not count toward the word budget', () => {
+  const v = require('../lib/validate');
+  const body = 'A FileInputStream you never close holds the descriptor until the process exits. '
+    + 'The collector may free the object while the OS still counts the handle as open. '
+    + 'Run out and every new socket fails, not only file reads. ';
+  const words = v.countWords(body);
+  const res = v.validatePost(JSON.stringify({
+    post: body + body, // ~90 words
+    hashtags: ['#One', '#Two', '#Three', '#Four', '#Five', '#Six'],
+  }), 'descriptor', {});
+  assert.ok(res.ok, res.errors.join('; '));
+  assert.strictEqual(res.post.words, words * 2, 'six hashtags must not inflate the count');
+});
+
+test('The limits are configurable per run', () => {
+  const v = require('../lib/validate');
+  const body = 'The descriptor stays open until the process exits, and the collector cannot help. '.repeat(10); // ~140 words
+  assert.ok(v.validatePost(JSON.stringify({ post: body, hashtags: ['#J'] }), 'descriptor', {}).ok,
+    '140 words must pass the default cap of 150');
+  const tight = v.validatePost(JSON.stringify({ post: body, hashtags: ['#J'] }), 'descriptor', { maxWords: 100 });
+  assert.ok(!tight.ok, 'the same post must fail a cap of 100');
+  assert.ok(tight.errors.some((e) => /the limit is 100/.test(e)));
+});
+
+test('Code tokens count like any other word, so a snippet cannot hide length', () => {
+  const v = require('../lib/validate');
+  assert.strictEqual(v.countWords('try (FileReader fr = new FileReader("f")) {\n  br.readLine();\n}'), 9);
+  assert.strictEqual(v.countWords('   '), 0);
 });
 
 // ===========================================================================

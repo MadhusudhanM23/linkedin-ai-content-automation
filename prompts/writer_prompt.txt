@@ -185,11 +185,28 @@ E. THE FAILURE
    What breaks, the mechanism that makes it break, and the thing that
    prevents it. Best when the research contains a real constraint.
 
-Whatever shape you pick, the post needs ONE concrete anchor: a small code
-snippet, a worked number, or a two-line comparison. Pick one. Not all three.
+Whatever shape you pick, the post needs ONE concrete anchor: a worked
+number, a two-line comparison, or a very short code snippet. Pick one.
 
-Length: aim for 900 to 1,600 characters. Long enough to teach, short enough
-to finish. Short paragraphs, 1 to 3 lines each. White space is the design.
+════════════════════════════════════════════════════════════════════
+LENGTH — this is enforced, and it is tight
+════════════════════════════════════════════════════════════════════
+
+The body must be between {{MIN_WORDS}} and {{MAX_WORDS}} words. Hashtags
+do not count. Code DOES count, every token of it.
+
+Aim for about {{TARGET_WORDS}} words so you land under the limit with room
+to spare. A post that runs over is rejected outright and never published.
+
+At this length you cannot afford a wind-up. That means:
+
+  • No introduction. The first sentence is already the point.
+  • One idea, proved once. If you find yourself writing "also", stop.
+  • If you use code, keep it to 3 or 4 lines, or use a two-line
+    comparison instead. A 10-line snippet is half your budget gone.
+  • Short paragraphs, 1 to 3 lines each. White space is the design.
+  • Cut the last paragraph if it only restates the first one. It
+    usually does.
 
 ════════════════════════════════════════════════════════════════════
 NEVER
@@ -209,7 +226,7 @@ mechanism plainly and let it carry the weight.
 HARD LIMITS — enforced by a validator, violations are not published
 ════════════════════════════════════════════════════════════════════
 
-  • "post" must be 180 to 2,600 characters.
+  • "post" must be {{MIN_WORDS}} to {{MAX_WORDS}} words, hashtags excluded.
   • "post" must clearly address: {{TOPIC}}
   • Put NO url in "post" unless that exact url appears in the research
     sources. If the research has no sources, use no urls at all.

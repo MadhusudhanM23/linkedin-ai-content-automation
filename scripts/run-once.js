@@ -133,7 +133,24 @@ async function generate(model, body, promptText) {
     const out = await gemini(model, body);
     const chunks = ((((out.json.candidates || [])[0] || {}).groundingMetadata || {}).groundingChunks || []);
     return { text: out.text, json: out.json, provider: 'gemini', grounded: chunks.length > 0 };
-  } catch (err) {
+  } catch (firstErr) {
+    // The Google Search tool is a separate, busier service than the model.
+    // When a grounded call fails, retry the same prompt without the tool
+    // before paying for Claude: still free, and the validator already treats
+    // ungrounded research as unverified, so no URL can reach the post.
+    if (body.tools) {
+      try {
+        const bare = Object.assign({}, body);
+        delete bare.tools;
+        const out = await gemini(model, bare);
+        log('Gemini grounded call failed (' + String(firstErr.message).slice(0, 80)
+          + ') - succeeded without search grounding');
+        return { text: out.text, json: out.json, provider: 'gemini-ungrounded', grounded: false };
+      } catch (retryErr) {
+        log('Gemini also failed without search grounding (' + String(retryErr.message).slice(0, 80) + ')');
+      }
+    }
+    const err = firstErr;
     log('Gemini failed (' + String(err.message).slice(0, 120) + ') - falling back to Claude');
     const out = await claude(promptText);
     log('Claude responded - NOTE: paid API, and no search grounding');
@@ -237,7 +254,16 @@ async function main() {
       + ' key points, ' + grounded.length + ' pages grounded');
 
     // -- write -----------------------------------------------------------
-    const writerPrompt = prompt('writer_prompt.txt', { TOPIC: row.topic, RESEARCH_JSON: JSON.stringify(research.data) });
+    const minWords = Number(env.POST_MIN_WORDS) > 0 ? Number(env.POST_MIN_WORDS) : validate.DEFAULT_MIN_WORDS;
+    const maxWords = Number(env.POST_MAX_WORDS) > 0 ? Number(env.POST_MAX_WORDS) : validate.DEFAULT_MAX_WORDS;
+    const writerPrompt = prompt('writer_prompt.txt', {
+      TOPIC: row.topic,
+      RESEARCH_JSON: JSON.stringify(research.data),
+      MIN_WORDS: String(minWords),
+      MAX_WORDS: String(maxWords),
+      // Models overrun. Asking for ~80% of the cap lands them under it.
+      TARGET_WORDS: String(Math.round(maxWords * 0.8)),
+    });
     const r2 = await generate(env.GEMINI_MODEL || 'gemini-2.5-flash', {
       contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],
       // Higher than the research call: sentence rhythm is what makes a post read
@@ -257,9 +283,11 @@ async function main() {
       previousHashes: previousHashes,
       sha256: sha256,
       strictUrls: !r1.grounded,
+      minWords: minWords,
+      maxWords: maxWords,
     });
     if (!post.ok) throw new Error('Post rejected: ' + post.errors.join('; '));
-    log('wrote post via ' + r2.provider + ': ' + post.post.length + ' chars'
+    log('wrote post via ' + r2.provider + ': ' + post.post.words + ' words, ' + post.post.length + ' chars'
       + (post.post.title ? ' - "' + post.post.title + '"' : '')
       + (post.post.visual ? ' [' + post.post.visual + ']' : ''));
     for (const w of post.warnings) log('  note: ' + w);
