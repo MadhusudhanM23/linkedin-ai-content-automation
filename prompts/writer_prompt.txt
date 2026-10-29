@@ -316,7 +316,7 @@ Return ONLY this JSON. No prose, no code fence around it.
   "title": "2-6 word headline for your angle. MUST contain one of: {{TOPIC_WORDS}}",
   "hook": "the opening line or two, repeated from the post. If the title does not contain one of {{TOPIC_WORDS}}, the first sentence must",
   "post": "the complete post, plain text, no markdown, no hashtags",
-  "hashtags": ["#DSA", "#Algorithms", "#SoftwareEngineering"],
+  "hashtags": ["3 to 6 tags for THIS post - the language, the class or feature, the concern. For a Java post that means #Java first. Never generic tags copied from anywhere"],
   "visual": "one id from the list above",
   "image_concept": "one short sentence naming the single visual idea",
   "image_prompt": "see THE IMAGE above - subject and mood only, no text",

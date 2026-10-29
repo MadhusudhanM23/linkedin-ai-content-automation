@@ -718,6 +718,21 @@ test('A narrowed angle passes the topic check when the headline carries the topi
   assert.ok(accepted.ok, 'the topic word in the published headline is enough: ' + accepted.errors.join('; '));
 });
 
+test('Hashtags copied verbatim from the old prompt example are rejected', () => {
+  const v = require('../lib/validate');
+  const body = 'A FileSystem opened over a JAR keeps attribute state until you close it. '
+    + 'Reads made before the close can return stale timestamps if the archive changed underneath. '
+    + 'Wrap it in try-with-resources and the close is guaranteed on every path, including the one that throws. '
+    + 'That is the whole fix, and it is easy to forget when the FileSystem is created far from where it is used.';
+  const parrot = v.validatePost(JSON.stringify({ post: body, title: 'Java FileSystem cache trap',
+    hashtags: ['#DSA', '#Algorithms', '#SoftwareEngineering'] }), 'Java API', {});
+  assert.ok(!parrot.ok);
+  assert.ok(parrot.errors.some((e) => /copied verbatim/.test(e)), parrot.errors.join('; '));
+  const real = v.validatePost(JSON.stringify({ post: body, title: 'Java FileSystem cache trap',
+    hashtags: ['#Java', '#NIO', '#SoftwareEngineering'] }), 'Java API', {});
+  assert.ok(real.ok, real.errors.join('; '));
+});
+
 test('Ordinary engineering words only warn, they do not block a post', () => {
   const v = require('../lib/validate');
   const tells = v.findTells('Robust error handling matters when you leverage a connection pool.');
