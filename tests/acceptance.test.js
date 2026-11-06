@@ -725,19 +725,17 @@ test('A narrowed angle passes the topic check when the headline carries the topi
   assert.ok(accepted.ok, 'the topic word in the published headline is enough: ' + accepted.errors.join('; '));
 });
 
-test('Hashtags copied verbatim from the old prompt example are rejected', () => {
+test('Hashtags copied from the old prompt example are dropped as unrelated', () => {
   const v = require('../lib/validate');
-  const body = 'A FileSystem opened over a JAR keeps attribute state until you close it. '
+  const body = paras('A FileSystem opened over a JAR keeps attribute state until you close it. '
     + 'Reads made before the close can return stale timestamps if the archive changed underneath. '
     + 'Wrap it in try-with-resources and the close is guaranteed on every path, including the one that throws. '
-    + 'That is the whole fix, and it is easy to forget when the FileSystem is created far from where it is used.';
-  const parrot = v.validatePost(JSON.stringify({ post: paras(body), title: 'Java FileSystem cache trap',
-    hashtags: ['#DSA', '#Algorithms', '#SoftwareEngineering'] }), 'Java API', { minWords: 40 });
-  assert.ok(!parrot.ok);
-  assert.ok(parrot.errors.some((e) => /copied verbatim/.test(e)), parrot.errors.join('; '));
-  const real = v.validatePost(JSON.stringify({ post: paras(body), title: 'Java FileSystem cache trap',
-    hashtags: ['#Java', '#NIO', '#SoftwareEngineering'] }), 'Java API', { minWords: 40 });
-  assert.ok(real.ok, real.errors.join('; '));
+    + 'That is the whole fix, and it is easy to forget when the FileSystem is created far from where it is used.');
+  const r = v.validatePost(JSON.stringify({ post: body, title: 'Java FileSystem cache trap',
+    hashtags: ['#DSA', '#Algorithms', '#SoftwareEngineering', '#Java', '#FileSystem'] }), 'Java API', { minWords: 40 });
+  assert.ok(r.ok, r.errors.join('; '));
+  assert.deepStrictEqual(r.post.hashtags, ['#SoftwareEngineering', '#Java', '#FileSystem']);
+  assert.ok(r.warnings.some((w) => /#DSA #Algorithms/.test(w)), 'the drop should be reported');
 });
 
 test('Variants of "not just X, it is Y" are caught too', () => {
@@ -785,7 +783,7 @@ test('A plainly written post passes the voice gate', () => {
     + 'Inserting is the other story. To put something in the middle you have to shift '
     + 'everything after it, and that is O(n) no matter how clever you are.\n\n'
     + 'So reach for an array when you read far more often than you insert.';
-  const res = v.validatePost(JSON.stringify({ post: body, hashtags: ['#DSA'] }), 'array', {});
+  const res = v.validatePost(JSON.stringify({ post: body, hashtags: ['#Array', '#DSA'] }), 'array', {});
   assert.ok(res.ok, 'clean prose should publish, got: ' + res.errors.join('; '));
   assert.strictEqual(v.findTells(body).banned.length, 0);
 });
@@ -973,7 +971,7 @@ test('The writer headline and image prompt survive validation', () => {
     + 'The default limit on most Linux boxes is 1024 per process, and it is easy to hit.';
   const res = v.validatePost(JSON.stringify({
     post: body,
-    hashtags: ['#Java'],
+    hashtags: ['#FileInputStream', '#Java'],
     title: 'Your file handles are leaking',
     visual: 'resource',
     image_prompt: 'dark fluid draining through a narrow channel',
@@ -1091,6 +1089,117 @@ test('Every placeholder the writer prompt uses is one the scripts fill in', () =
   }
 });
 
+section('Related hashtags');
+
+test('Only hashtags that name something in the post are kept', () => {
+  const v = require('../lib/validate');
+  const text = 'Each Thread holds a ThreadLocalMap. Without ThreadLocal.remove() a pooled thread keeps '
+    + 'the value, and you get memory leaks. Use try-with-resources. Java ThreadLocal Memory Leaks';
+  const r = v.relatedHashtags(['#Java', '#MemoryLeak', '#ThreadLocal', '#TryWithResources', '#Concurrency',
+    '#SoftwareEngineering', '#Programming', '#DSA'], text);
+  assert.deepStrictEqual(r.kept, ['#Java', '#MemoryLeak', '#ThreadLocal', '#TryWithResources', '#SoftwareEngineering']);
+  assert.deepStrictEqual(r.dropped, ['#Concurrency', '#Programming', '#DSA']);
+});
+
+test('Short tags must match whole words, not fragments of other words', () => {
+  const v = require('../lib/validate');
+  // "holds a" squashes to "...dsa..."; "rapid" contains "api".
+  assert.deepStrictEqual(v.relatedHashtags(['#DSA', '#API'], 'The thread holds a rapid lock').kept, []);
+  assert.deepStrictEqual(v.relatedHashtags(['#API'], 'A REST API returns JSON').kept, ['#API']);
+});
+
+test('A post whose hashtags are all unrelated is rejected', () => {
+  const v = require('../lib/validate');
+  const body = paras('Every stage of a CompletableFuture without an Executor runs on ForkJoinPool.commonPool. '.repeat(9));
+  const r = v.validatePost(JSON.stringify({ post: body, title: 'Java pool', hashtags: ['#Kubernetes', '#Marketing'] }), 'Java API', {});
+  assert.ok(r.errors.some((e) => /None of the hashtags relate/.test(e)), r.errors.join('; '));
+});
+
+section('Writer-designed scenes');
+
+const SCENES = {
+  container: { layout: 'container',
+    nodes: [{ id: 'w', label: 'worker-1', sub: 'reused', tone: 'accent' }, { id: 't', label: 'ThreadLocal', tone: 'muted' }, { id: 'u', label: 'UserContext', sub: 'still held', tone: 'bad' }],
+    container: { id: 'm', label: 'ThreadLocalMap', sub: 'one per thread', rows: [{ id: 'k', label: 'key', tag: 'weak ref' }, { id: 'v', label: 'value', tag: 'strong ref', tone: 'bad' }] },
+    edges: [{ from: 'w', to: 'm' }, { from: 'k', to: 't', dashed: true, tone: 'muted' }, { from: 'v', to: 'u', tone: 'bad' }],
+    callout: { label: 'FIX', text: 'try { ... } finally { tl.remove(); }' } },
+  chain: { layout: 'chain',
+    nodes: [{ id: 'a', label: 'supplyAsync()' }, { id: 'b', label: 'commonPool', tone: 'accent' }, { id: 'c', label: 'blocking I/O', tone: 'bad' }, { id: 'd', label: 'other stages wait', row: 2, tone: 'muted' }],
+    edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'd', label: 'starves', tone: 'bad' }],
+    callout: { label: 'FIX', text: 'supplyAsync(task, ioPool)' } },
+  compare: { layout: 'compare', panels: [{ title: 'Without', tone: 'bad', lines: ['value outlives request'] }, { title: 'With', tone: 'good', lines: ['remove() in finally'] }] },
+  layers: { layout: 'layers', side: 'request', layers: [{ label: 'Controller' }, { label: 'Service', tone: 'accent' }, { label: 'Repository', sub: 'N+1 here', tone: 'bad' }, { label: 'Database' }] },
+  timeline: { layout: 'timeline', steps: [{ label: 'open()' }, { label: 'read() throws', tone: 'bad' }, { label: 'close() skipped', tone: 'bad' }, { label: 'fd limit' }] },
+};
+
+test('Every scene layout validates from writer-shaped input', () => {
+  const scene = require('../local-image/lib/scene');
+  for (const k of Object.keys(SCENES)) {
+    const r = scene.validate(SCENES[k]);
+    assert.ok(r.ok, k + ': ' + r.errors.join('; '));
+  }
+});
+
+test('Malformed scenes are rejected, so the poster falls back', () => {
+  const scene = require('../local-image/lib/scene');
+  assert.ok(!scene.validate({ layout: 'spiral' }).ok, 'unknown layout');
+  assert.ok(!scene.validate({ layout: 'chain', nodes: [{ id: 'a', label: 'only one' }] }).ok, 'chain with one node');
+  assert.ok(!scene.validate({ layout: 'compare', panels: [{ title: 'one', lines: ['x'] }] }).ok, 'compare with one panel');
+  assert.ok(!scene.validate(null).ok);
+  // Edges to unknown ids are dropped rather than drawn into nowhere.
+  const r = scene.validate({ layout: 'chain', nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], edges: [{ from: 'a', to: 'zzz' }] });
+  assert.ok(r.ok);
+  assert.strictEqual(r.scene.edges.length, 0);
+});
+
+test('Every scene layout stays inside the box it is given', () => {
+  const scene = require('../local-image/lib/scene');
+  const c = { a: '#1D4ED8', b: '#6D28D9', fg: '#0F172A', muted: '#475569', panel: '#F1F5F9' };
+  const TOL = 2;
+  for (const dims of [[1024, 460], [700, 360]]) {
+    const box = { x: 50, y: 20, w: dims[0], h: dims[1] };
+    for (const k of Object.keys(SCENES)) {
+      const v = scene.validate(SCENES[k]);
+      const svg = scene.render(v.scene, c, box.x, box.y, box.w, box.h);
+      // Scaled output is wrapped in a transform; map back to real coordinates.
+      const m0 = /<g transform="translate\((-?[\d.]+) (-?[\d.]+)\) scale\(([\d.]+)\)">/.exec(svg);
+      const tx = m0 ? +m0[1] : 0;
+      const ty = m0 ? +m0[2] : 0;
+      const sc = m0 ? +m0[3] : 1;
+      const X = (v2) => tx + v2 * sc;
+      const Y = (v2) => ty + v2 * sc;
+      const where = k + ' at ' + dims.join('x');
+      const check = (x, y, what) => {
+        assert.ok(x >= box.x - TOL && x <= box.x + box.w + TOL, where + ': ' + what + ' x=' + x.toFixed(1));
+        assert.ok(y >= box.y - TOL && y <= box.y + box.h + TOL, where + ': ' + what + ' y=' + y.toFixed(1));
+      };
+      let m;
+      const rects = /<rect x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)"/g;
+      while ((m = rects.exec(svg))) { check(X(+m[1]), Y(+m[2]), 'rect'); check(X(+m[1] + +m[3]), Y(+m[2] + +m[4]), 'rect corner'); }
+      const lines = /<line x1="(-?[\d.]+)" y1="(-?[\d.]+)" x2="(-?[\d.]+)" y2="(-?[\d.]+)"/g;
+      while ((m = lines.exec(svg))) { check(X(+m[1]), Y(+m[2]), 'line'); check(X(+m[3]), Y(+m[4]), 'line end'); }
+    }
+  }
+});
+
+test('A valid scene replaces the library diagram; an invalid one falls back', () => {
+  const poster = require('../local-image/lib/poster');
+  const withScene = poster.buildSvg({ topic: 'Java API', title: 'Java ThreadLocal leaks', concept: 'Remove it in finally.', scene: SCENES.container });
+  assert.ok(withScene.includes('ThreadLocalMap') && withScene.includes('still held'), 'scene not drawn');
+  const fallback = poster.buildSvg({ topic: 'Java API', title: 'Your file handles are leaking', scene: { layout: 'spiral' } });
+  assert.ok(fallback.includes('still held') && fallback.includes('open()'), 'expected the library resource diagram as fallback');
+});
+
+test('Consecutive posts do not all share one composition', () => {
+  const poster = require('../local-image/lib/poster');
+  const seen = new Set();
+  for (let i = 0; i < 12; i++) {
+    const svg = poster.buildSvg({ topic: 'Java API', title: 'Java pool starvation', concept: 'Use your own executor.', scene: SCENES.chain, seed: 'row-' + i });
+    seen.add(svg.indexOf('supplyAsync(task') < svg.indexOf('commonPool') ? 'fix-first' : 'drawing-first');
+  }
+  assert.strictEqual(seen.size, 2, 'expected both compositions across 12 seeds, got ' + [...seen]);
+});
+
 section('Word budget');
 
 test('A post over the word limit is rejected, not trimmed', () => {
@@ -1130,7 +1239,7 @@ test('Hashtags do not count toward the word budget', () => {
   const words = v.countWords(body);
   const res = v.validatePost(JSON.stringify({
     post: paras(body + body + body), // ~114 words
-    hashtags: ['#One', '#Two', '#Three', '#Four', '#Five', '#Six'],
+    hashtags: ['#FileInputStream', '#Descriptor', '#Socket', '#Collector', '#SoftwareEngineering', '#Programming'],
   }), 'descriptor', {});
   assert.ok(res.ok, res.errors.join('; '));
   assert.strictEqual(res.post.words, words * 3, 'six hashtags must not inflate the count');
@@ -1139,9 +1248,9 @@ test('Hashtags do not count toward the word budget', () => {
 test('The limits are configurable per run', () => {
   const v = require('../lib/validate');
   const body = 'The descriptor stays open until the process exits, and the collector cannot help. '.repeat(7); // ~98 words
-  assert.ok(v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#J'] }), 'descriptor', {}).ok,
+  assert.ok(v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#Descriptor'] }), 'descriptor', {}).ok,
     '~100 words must pass the default 85-115 range');
-  const tight = v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#J'] }), 'descriptor', { maxWords: 90 });
+  const tight = v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#Descriptor'] }), 'descriptor', { maxWords: 90 });
   assert.ok(!tight.ok, 'the same post must fail a cap of 90');
   assert.ok(tight.errors.some((e) => /the limit is 90/.test(e)));
 });

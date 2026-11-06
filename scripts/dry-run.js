@@ -172,6 +172,7 @@ async function main() {
         topic: TOPIC,
         concept: postResult.post.imageConcept,
         visual: postResult.post.visual,
+        scene: postResult.post.scene,
         title: postResult.post.title,
         imagePrompt: postResult.post.imagePrompt,
         points: researchResult.data.key_points.slice(0, 3),

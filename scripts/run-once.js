@@ -215,7 +215,7 @@ async function main() {
     if (!post.ok) throw new Error('Post rejected: ' + post.errors.join('; '));
     log('wrote post via ' + r2.provider + ': ' + post.post.words + ' words, ' + post.post.length + ' chars'
       + (post.post.title ? ' - "' + post.post.title + '"' : '')
-      + (post.post.visual ? ' [' + post.post.visual + ']' : ''));
+      + (post.post.scene && post.post.scene.layout ? ' [scene:' + post.post.scene.layout + ']' : (post.post.visual ? ' [' + post.post.visual + ']' : '')));
     for (const w of post.warnings) log('  note: ' + w);
 
     // -- image -----------------------------------------------------------
@@ -228,6 +228,7 @@ async function main() {
         topic: row.topic,
         concept: post.post.imageConcept,
         visual: post.post.visual,
+        scene: post.post.scene,
         title: post.post.title,
         imagePrompt: post.post.imagePrompt,
         points: research.data.key_points.slice(0, 3),

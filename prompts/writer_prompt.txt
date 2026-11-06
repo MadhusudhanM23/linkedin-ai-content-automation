@@ -264,7 +264,7 @@ HARD LIMITS — enforced by a validator, violations are not published
 THE IMAGE
 ════════════════════════════════════════════════════════════════════
 
-Two fields drive the picture. Fill in both.
+Two fields drive the picture: "scene" (main) and "visual" (fallback).
 
 "visual" picks a diagram that is drawn locally, in code. Choose the one
 that draws what YOUR POST argues, not what the topic is called. A post
@@ -301,23 +301,51 @@ said "Java API". Pick on the mechanism you explained:
   collections  two collection types with their cost per operation
   flow         a neutral three-stage diagram — use only if nothing else fits
 
-"image_prompt" describes background artwork, generated separately. It sits
-BEHIND the headline, which is drawn as real text on top, so:
+"scene" is the MAIN picture. You design a diagram of THIS post's mechanism,
+and it is drawn for you. "visual" is only the fallback if the scene is
+unusable. Describe WHAT to draw; never give coordinates or sizes.
 
-  • Describe mood, texture, colour and an abstract subject. Nothing else.
-  • NEVER ask for text, words, letters, numbers, labels, UI or code. The
-    generator cannot spell, and anything it writes comes out as nonsense.
-  • NEVER ask for people, faces, hands, logos or brands.
-  • Keep it dark and low-contrast — bright busy art makes the headline
-    unreadable on top of it.
-  • Tie it to the mechanism, loosely. A leak post might be "dark fluid
-    draining through a narrow aperture". An index post might be
-    "converging light paths finding one point in a lattice".
+A good scene is the one a senior engineer would sketch on a whiteboard to
+explain your post in ten seconds. It shows the cause, the consequence, and
+the fix - with the real class, method and config names from the post.
 
-  Example: "abstract dark visualisation of fluid draining away through a
-  narrow channel, deep indigo and dim amber, volumetric light, heavy
-  negative space in the upper half, cinematic, photorealistic texture,
-  no text, no words, no people" 
+Pick the layout that fits the mechanism. DO NOT default to the same one -
+posts in a feed should not look alike:
+
+  container   something HOLDS rows, and each row points somewhere.
+              ThreadLocal: worker -> ThreadLocalMap{key weak, value strong}
+              -> ThreadLocal (collected) / UserContext (still held).
+  chain       a cause flows into an effect, left to right; up to 2 nodes
+              may hang below (row 2) to show what it leads to.
+              supplyAsync() -> commonPool -> blocking I/O, then below:
+              "every other stage waits".
+  compare     the wrong way next to the right way, 2-4 short lines each.
+  layers      a request passes down a stack; one layer is where it breaks.
+              Controller -> Service -> Repository (N+1 here) -> Database.
+  timeline    things happen in order and one step goes wrong.
+              open() -> read() throws -> close() skipped -> fd limit hit.
+
+Tones: "neutral" normal, "accent" the thing in focus, "bad" the problem,
+"good" the fix, "muted" gone / inactive (drawn dashed).
+Labels: real identifiers where they exist (commonPool, remove(),
+@Transactional), max ~26 characters. "sub" is a 2-5 word note under it.
+"callout" is the one line to remember: label "FIX" / "RULE" / "AVOID",
+text max ~60 characters, ideally real code.
+
+Shapes, by layout:
+  container: { "layout":"container",
+               "nodes":[{"id","label","sub","tone"}],     sources and targets
+               "container":{"id","label","sub","rows":[{"id","label","tag","tone"}]},
+               "edges":[{"from","to","label","tone","dashed"}],
+               "callout":{"label","text"} }
+             An edge from a node to the container id makes that node a source
+             (left). An edge from a row id to a node makes it a target (right).
+  chain:     { "layout":"chain", "nodes":[{"id","label","sub","tone","row"}],
+               "edges":[...], "callout":{...} }   2-4 nodes in row 1, 0-2 in row 2
+  compare:   { "layout":"compare", "panels":[{"title","tone","lines":[...]},
+               {"title","tone","lines":[...]}], "callout":{...} }
+  layers:    { "layout":"layers", "side":"request", "layers":[{"label","sub","tone"}], "callout":{...} }
+  timeline:  { "layout":"timeline", "steps":[{"label","sub","tone"}], "callout":{...} }
 
 ════════════════════════════════════════════════════════════════════
 OUTPUT
@@ -329,10 +357,10 @@ Return ONLY this JSON. No prose, no code fence around it.
   "title": "2-6 word headline for your angle. MUST contain one of: {{TOPIC_WORDS}}",
   "hook": "the opening line or two, repeated from the post. If the title does not contain one of {{TOPIC_WORDS}}, the first sentence must",
   "post": "{{MIN_WORDS}}-{{MAX_WORDS}} words in EXACTLY 3 short paragraphs. Inside this JSON string, separate the paragraphs with \\n\\n (a blank line) - a post written as one line is rejected. Plain text, no markdown, no hashtags",
-  "hashtags": ["3 to 6 tags for THIS post - the language, the class or feature, the concern. For a Java post that means #Java first. Never generic tags copied from anywhere"],
-  "visual": "one id from the list above",
+  "hashtags": ["3 to 6 tags, each naming something IN this post: the language first (#Java), then the exact class or feature (#ThreadLocal, #CompletableFuture), then the concern (#MemoryLeak, #Concurrency). At most one broad tag like #SoftwareEngineering. Tags unrelated to the post are removed"],
+  "visual": "fallback diagram id from the list above",
+  "scene": { "layout": "container | chain | compare | layers | timeline - see THE IMAGE; vary it", "...": "fields for that layout" },
   "image_concept": "the takeaway in ONE plain sentence of 6-12 words, printed under the headline on the image - what the reader should remember, e.g. \"Blocking calls starve the shared pool.\" Not a description of the picture",
-  "image_prompt": "see THE IMAGE above - subject and mood only, no text",
   "word_count": "the number of words in post, counted after writing it",
   "source_urls": ["only urls that appear in the research sources"]
 }

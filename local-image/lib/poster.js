@@ -16,6 +16,7 @@
 const crypto = require('crypto');
 const { escapeXml, measure, wrap, fitSize } = require('./svgutil');
 const diagrams = require('./diagrams');
+const sceneLib = require('./scene');
 
 // Light palettes. Dark posters read as heavy in a light LinkedIn feed and
 // were rejected for it. `panel` is the fill for diagram boxes: a tint just off
@@ -360,27 +361,55 @@ function buildSvg(input) {
       'fill="' + theme.fg + '" fill-opacity="0.92">' + escapeXml(point) + '</text>';
   });
 
-  // The diagram. It is capped and centred in whatever space is left, so a short
-  // drawing sits in the middle of the gap rather than stranding its caption at
-  // the bottom of the frame.
+  const palette = { a: accentA, b: accentB, fg: theme.fg, muted: theme.muted, panel: theme.panel };
   const availH = Math.max(MIN_DIAGRAM, L.diagramHeight);
-  // Capped well below the space available: the drawings sit at the top of
-  // their box, so a tall box left a dead gap under them.
-  const useH = Math.min(availH, conceptLines.length ? 400 : 460);
-  svg += diagrams.render(kind, {
-    x: PAD,
-    y: L.diagramTop + (availH - useH) / 2,
-    w: colWidth,
-    h: useH,
-    a: accentA,
-    b: accentB,
-    fg: theme.fg,
-    muted: theme.muted,
-    panel: theme.panel,
-    labels: stageLabels(opts.points),
-    caption: conceptLines.length ? false : true,
-    random: random,
-  });
+
+  // A scene from the writer draws THIS post's mechanism. When it validates it
+  // replaces the library diagram; when it does not, the library is the
+  // fallback, so a malformed scene can never cost the post its image.
+  const sceneCheck = opts.scene ? sceneLib.validate(opts.scene) : null;
+  if (sceneCheck && sceneCheck.ok) {
+    const sc = sceneCheck.scene;
+    const callH = sc.callout ? sceneLib.CALLOUT_H : 0;
+    const gapH = sc.callout ? 34 : 0;
+    // Two compositions, chosen from the seed, so consecutive posts do not
+    // share one template: fix line under the drawing, or straight under the
+    // subtitle with the drawing below it.
+    const calloutFirst = sc.callout && ((seed >>> 4) % 2 === 1);
+    // Drawing and fix line are positioned as ONE group, so a short drawing
+    // never strands the fix line at the bottom of the frame. The group sits
+    // a little above centre, closer to the headline it belongs to.
+    const maxDraw = availH - callH - gapH;
+    const drawnH = Math.min(maxDraw, sceneLib.measureScene(sc, palette, colWidth, maxDraw));
+    const groupH = drawnH + gapH + callH;
+    const top = L.diagramTop + Math.max(0, (availH - groupH) * 0.3);
+    if (calloutFirst) {
+      svg += sceneLib.drawCallout(sc.callout, palette, PAD, top, colWidth);
+      svg += sceneLib.render(sc, palette, PAD, top + callH + gapH, colWidth, drawnH, 'top');
+    } else {
+      svg += sceneLib.render(sc, palette, PAD, top, colWidth, drawnH, 'top');
+      if (sc.callout) svg += sceneLib.drawCallout(sc.callout, palette, PAD, top + drawnH + gapH, colWidth);
+    }
+  } else {
+    // The library diagram, capped and centred in the space left. Capped well
+    // below the space available: the drawings sit at the top of their box, so
+    // a tall box left a dead gap under them.
+    const useH = Math.min(availH, conceptLines.length ? 400 : 460);
+    svg += diagrams.render(kind, {
+      x: PAD,
+      y: L.diagramTop + (availH - useH) / 2,
+      w: colWidth,
+      h: useH,
+      a: accentA,
+      b: accentB,
+      fg: theme.fg,
+      muted: theme.muted,
+      panel: theme.panel,
+      labels: stageLabels(opts.points),
+      caption: conceptLines.length ? false : true,
+      random: random,
+    });
+  }
 
   // Footer.
   const footer = chipLabel(opts.footer || '', 60);
@@ -406,4 +435,5 @@ module.exports = {
   stageLabels,
   buildSvg,
   detectDiagram: diagrams.detect,
+  validateScene: sceneLib.validate,
 };
