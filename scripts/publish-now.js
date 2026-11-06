@@ -56,7 +56,26 @@ function liHeaders(extra) {
   }, extra || {});
 }
 
+const FROM = (process.argv.find((a) => a.startsWith('--from=')) || '').slice(7);
+const IMAGE = (process.argv.find((a) => a.startsWith('--image=')) || '').slice(8);
+
+/** Publish a saved post verbatim: no research, no writing, no new image. */
+async function publishSaved() {
+  const saved = JSON.parse(fs.readFileSync(path.resolve(FROM), 'utf8'));
+  const imageFile = path.resolve(IMAGE || saved.image);
+  const png = fs.readFileSync(imageFile);
+  if (png.subarray(0, 4).toString('hex') !== '89504e47') throw new Error(imageFile + ' is not a PNG');
+  if (validate.countWords(saved.commentary) < 20) throw new Error(FROM + ' has no usable commentary');
+  console.log('\nMode:  --from  (publishing a saved post exactly as written)');
+  console.log('  post : ' + FROM);
+  console.log('  image: ' + imageFile + ' (' + Math.round(png.length / 1024) + ' KB)');
+  rule('THE POST');
+  console.log('\n' + saved.commentary + '\n');
+  await publishToLinkedIn(saved.commentary, png, saved.altText || saved.topic);
+}
+
 async function main() {
+  if (FROM) return publishSaved();
   console.log('\nTopic: ' + TOPIC);
   console.log(PUBLISH ? 'Mode:  --publish  (a REAL post will be created)' : 'Mode:  preview only');
 
@@ -164,13 +183,32 @@ async function main() {
   console.log('  ' + img.file);
 
   if (!PUBLISH) {
+    // Saved so the draft you approved is the draft that gets posted;
+    // --publish would regenerate and post something you have not seen.
+    const saved = path.join(ROOT, 'local-image', 'output', 'last-preview.json');
+    fs.writeFileSync(saved, JSON.stringify({
+      topic: TOPIC,
+      commentary: post.post.commentary,
+      altText: post.post.imageConcept || TOPIC,
+      image: img.file,
+    }, null, 2));
     rule('NOT PUBLISHED');
-    console.log('\n  Preview only. To publish this for real:\n');
+    console.log('\n  Preview only. To publish THIS exact post:\n');
+    console.log('    node scripts/publish-now.js --from=' + path.relative(ROOT, saved) + '\n');
+    console.log('  Or generate and publish a fresh one:\n');
     console.log('    node scripts/publish-now.js "' + TOPIC + '" --publish\n');
     return;
   }
 
   // --- publish -----------------------------------------------------------
+  await publishToLinkedIn(post.post.commentary, png, post.post.imageConcept || TOPIC);
+}
+
+/**
+ * Upload one PNG and create the post. Shared by the normal run and by
+ * --from, which publishes a saved preview exactly as it was approved.
+ */
+async function publishToLinkedIn(commentary, png, altText) {
   rule('6. PUBLISH TO LINKEDIN');
   const meRes = await fetch('https://api.linkedin.com/v2/userinfo', {
     headers: { Authorization: 'Bearer ' + env.LINKEDIN_ACCESS_TOKEN },
@@ -202,10 +240,10 @@ async function main() {
     headers: liHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       author: author,
-      commentary: post.post.commentary,
+      commentary: commentary,
       visibility: 'PUBLIC',
       distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },
-      content: { media: { id: init.value.image, altText: (post.post.imageConcept || TOPIC).slice(0, 300) } },
+      content: { media: { id: init.value.image, altText: String(altText || '').slice(0, 300) } },
       lifecycleState: 'PUBLISHED',
       isReshareDisabledByAuthor: false,
     }),
@@ -217,12 +255,13 @@ async function main() {
     console.error('  No x-restli-id returned, so treat this as NOT published.');
     console.error('  Check your profile before retrying - do not re-run blindly.');
     process.exitCode = 1;
-    return;
+    return null;
   }
 
   rule('PUBLISHED - LIVE ON YOUR PROFILE');
   console.log('\n  ' + postId);
   console.log('  https://www.linkedin.com/feed/update/' + postId + '/\n');
+  return postId;
 }
 
 main().catch((err) => {
