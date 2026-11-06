@@ -1108,6 +1108,15 @@ test('Short tags must match whole words, not fragments of other words', () => {
   assert.deepStrictEqual(v.relatedHashtags(['#API'], 'A REST API returns JSON').kept, ['#API']);
 });
 
+test('Compound tags match on their specific half, with stems', () => {
+  const v = require('../lib/validate');
+  // From a real draft: "managing resources" and "exceptions" - not "management" or "handling".
+  const t = 'try-with-resources is great for managing resources. Exceptions thrown while closing are suppressed. Java';
+  const r = v.relatedHashtags(['#Java', '#ExceptionHandling', '#ResourceManagement', '#JavaScript'], t);
+  assert.deepStrictEqual(r.kept, ['#Java', '#ExceptionHandling', '#ResourceManagement']);
+  assert.deepStrictEqual(r.dropped, ['#JavaScript'], 'a Java post must not keep #JavaScript');
+});
+
 test('A post whose hashtags are all unrelated is rejected', () => {
   const v = require('../lib/validate');
   const body = paras('Every stage of a CompletableFuture without an Executor runs on ForkJoinPool.commonPool. '.repeat(9));

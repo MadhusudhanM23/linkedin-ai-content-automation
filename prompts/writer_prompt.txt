@@ -356,7 +356,7 @@ Return ONLY this JSON. No prose, no code fence around it.
 {
   "title": "2-6 word headline for your angle. MUST contain one of: {{TOPIC_WORDS}}",
   "hook": "the opening line or two, repeated from the post. If the title does not contain one of {{TOPIC_WORDS}}, the first sentence must",
-  "post": "{{MIN_WORDS}}-{{MAX_WORDS}} words in EXACTLY 3 short paragraphs. Inside this JSON string, separate the paragraphs with \\n\\n (a blank line) - a post written as one line is rejected. Plain text, no markdown, no hashtags",
+  "post": "{{MIN_WORDS}}-{{MAX_WORDS}} words INCLUDING any code (a snippet is 3 lines at most) in EXACTLY 3 short paragraphs. Inside this JSON string, separate the paragraphs with \\n\\n (a blank line) - a post written as one line is rejected. Plain text, no markdown, no hashtags",
   "hashtags": ["3 to 6 tags, each naming something IN this post: the language first (#Java), then the exact class or feature (#ThreadLocal, #CompletableFuture), then the concern (#MemoryLeak, #Concurrency). At most one broad tag like #SoftwareEngineering. Tags unrelated to the post are removed"],
   "visual": "fallback diagram id from the list above",
   "scene": { "layout": "container | chain | compare | layers | timeline - see THE IMAGE; vary it", "...": "fields for that layout" },
