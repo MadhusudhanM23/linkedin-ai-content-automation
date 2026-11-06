@@ -209,8 +209,20 @@ LENGTH — this is enforced, and it is tight
 The body must be between {{MIN_WORDS}} and {{MAX_WORDS}} words. Hashtags
 do not count. Code DOES count, every token of it.
 
-Aim for {{TARGET_WORDS}} words. That is the target, not a ceiling to creep toward -
-land within a few words of it, with room
+Aim for {{TARGET_WORDS}} words. Drafts of this kind come out about 20 words
+SHORT, and a short post is rejected exactly like a long one. So build to
+the length deliberately rather than guessing:
+
+  • 3 paragraphs of 2-3 sentences each - roughly 25-30 words apiece.
+  • Plus, optionally, ONE snippet of 3-4 lines, or a two-line comparison.
+  • If you are under {{MIN_WORDS}}, do not pad. Add one concrete sentence:
+    the symptom someone actually sees, a default value, or the version
+    where the behaviour changed.
+
+Before you answer, count the words in "post" and put the number in
+"word_count". If it is outside {{MIN_WORDS}}-{{MAX_WORDS}}, fix the post first.
+
+Land within a few words of the target, with room
 to spare. A post that runs over is rejected outright and never published.
 
 At this length you cannot afford a wind-up. That means:
@@ -321,5 +333,6 @@ Return ONLY this JSON. No prose, no code fence around it.
   "visual": "one id from the list above",
   "image_concept": "the takeaway in ONE plain sentence of 6-12 words, printed under the headline on the image - what the reader should remember, e.g. \"Blocking calls starve the shared pool.\" Not a description of the picture",
   "image_prompt": "see THE IMAGE above - subject and mood only, no text",
+  "word_count": "the number of words in post, counted after writing it",
   "source_urls": ["only urls that appear in the research sources"]
 }
