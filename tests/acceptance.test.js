@@ -938,6 +938,14 @@ test('A question answered immediately still counts as a rhetorical opener', () =
     'question-then-answer opener was not caught');
 });
 
+test('A question is caught even when an identifier dot comes first', () => {
+  const v = require('../lib/validate');
+  // From a real draft.
+  const t = v.findTells("Using Java's CompletableFuture.allOf() to wait for multiple tasks? It won't tell you which one failed.");
+  assert.ok(t.structural.some((x) => x.includes('rhetorical question')));
+  assert.strictEqual(v.findTells('Call ThreadLocal.remove() in finally. It is cheap.').structural.length, 0);
+});
+
 test('A first line that is a statement is not flagged', () => {
   const v = require('../lib/validate');
   const tells = v.findTells('A FileInputStream you never close holds the descriptor until exit.\n\nThat is the bug.');
@@ -1197,6 +1205,14 @@ test('A valid scene replaces the library diagram; an invalid one falls back', ()
   assert.ok(withScene.includes('ThreadLocalMap') && withScene.includes('still held'), 'scene not drawn');
   const fallback = poster.buildSvg({ topic: 'Java API', title: 'Your file handles are leaking', scene: { layout: 'spiral' } });
   assert.ok(fallback.includes('still held') && fallback.includes('open()'), 'expected the library resource diagram as fallback');
+});
+
+test('A fix line identical to the subtitle is dropped', () => {
+  const poster = require('../local-image/lib/poster');
+  const scene = { layout: 'compare', panels: [{ title: 'Problem', tone: 'bad', lines: ['join() throws once'] }, { title: 'Fix', tone: 'good', lines: ['exceptionally() per future'] }],
+    callout: { label: 'RULE', text: 'Handle individual CompletableFuture errors.' } };
+  const svg = poster.buildSvg({ topic: 'Java API', title: 'CompletableFuture errors', concept: 'Handle individual CompletableFuture errors', scene: scene });
+  assert.strictEqual(svg.split('Handle individual CompletableFuture errors').length - 1, 1, 'the takeaway should appear once');
 });
 
 test('Consecutive posts do not all share one composition', () => {

@@ -370,6 +370,9 @@ function buildSvg(input) {
   const sceneCheck = opts.scene ? sceneLib.validate(opts.scene) : null;
   if (sceneCheck && sceneCheck.ok) {
     const sc = sceneCheck.scene;
+    // A fix line that repeats the subtitle word for word wastes the space.
+    const norm = function (t) { return String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); };
+    if (sc.callout && norm(sc.callout.text) === norm(opts.concept)) sc.callout = null;
     const callH = sc.callout ? sceneLib.CALLOUT_H : 0;
     const gapH = sc.callout ? 34 : 0;
     // Two compositions, chosen from the seed, so consecutive posts do not

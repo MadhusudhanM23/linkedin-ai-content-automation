@@ -330,7 +330,10 @@ Tones: "neutral" normal, "accent" the thing in focus, "bad" the problem,
 Labels: real identifiers where they exist (commonPool, remove(),
 @Transactional), max ~26 characters. "sub" is a 2-5 word note under it.
 "callout" is the one line to remember: label "FIX" / "RULE" / "AVOID",
-text max ~60 characters, ideally real code.
+text max ~60 characters, ideally real code. It must say something the
+subtitle (image_concept) does not - usually the code that fixes it.
+Compare panels: each line a complete short claim ("join() throws only
+the first failure"), not a fragment like "future1, future2".
 
 Shapes, by layout:
   container: { "layout":"container",
