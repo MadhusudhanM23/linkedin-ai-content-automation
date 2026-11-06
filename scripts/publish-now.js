@@ -107,7 +107,7 @@ async function main() {
     .replace(/\{\{RESEARCH_JSON\}\}/g, JSON.stringify(research.data))
     .replace(/\{\{MIN_WORDS\}\}/g, String(minWords))
     .replace(/\{\{MAX_WORDS\}\}/g, String(maxWords))
-    .replace(/\{\{TARGET_WORDS\}\}/g, String(Math.round(maxWords * 0.8)));
+    .replace(/\{\{TARGET_WORDS\}\}/g, String(Math.round((minWords + maxWords) / 2)));
 
   const r2 = await llm.generate({ env: env, log: (m) => console.log('  ' + m) }, env.GEMINI_MODEL || 'gemini-2.5-flash', {
     contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],

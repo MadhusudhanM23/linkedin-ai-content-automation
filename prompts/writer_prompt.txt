@@ -209,7 +209,8 @@ LENGTH — this is enforced, and it is tight
 The body must be between {{MIN_WORDS}} and {{MAX_WORDS}} words. Hashtags
 do not count. Code DOES count, every token of it.
 
-Aim for about {{TARGET_WORDS}} words so you land under the limit with room
+Aim for {{TARGET_WORDS}} words. That is the target, not a ceiling to creep toward -
+land within a few words of it, with room
 to spare. A post that runs over is rejected outright and never published.
 
 At this length you cannot afford a wind-up. That means:
@@ -318,7 +319,7 @@ Return ONLY this JSON. No prose, no code fence around it.
   "post": "the complete post, plain text, no markdown, no hashtags",
   "hashtags": ["3 to 6 tags for THIS post - the language, the class or feature, the concern. For a Java post that means #Java first. Never generic tags copied from anywhere"],
   "visual": "one id from the list above",
-  "image_concept": "one short sentence naming the single visual idea",
+  "image_concept": "the takeaway in ONE plain sentence of 6-12 words, printed under the headline on the image - what the reader should remember, e.g. \"Blocking calls starve the shared pool.\" Not a description of the picture",
   "image_prompt": "see THE IMAGE above - subject and mood only, no text",
   "source_urls": ["only urls that appear in the research sources"]
 }

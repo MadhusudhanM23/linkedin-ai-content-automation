@@ -188,7 +188,7 @@ async function main() {
       MIN_WORDS: String(minWords),
       MAX_WORDS: String(maxWords),
       // Models overrun. Asking for ~80% of the cap lands them under it.
-      TARGET_WORDS: String(Math.round(maxWords * 0.8)),
+      TARGET_WORDS: String(Math.round((minWords + maxWords) / 2)),
     });
     const r2 = await llm.generate({ env: env, log: log }, env.GEMINI_MODEL || 'gemini-2.5-flash', {
       contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],

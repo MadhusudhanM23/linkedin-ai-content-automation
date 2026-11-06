@@ -126,7 +126,7 @@ async function main() {
     .replace(/\{\{RESEARCH_JSON\}\}/g, JSON.stringify(researchResult.data))
     .replace(/\{\{MIN_WORDS\}\}/g, String(minWords))
     .replace(/\{\{MAX_WORDS\}\}/g, String(maxWords))
-    .replace(/\{\{TARGET_WORDS\}\}/g, String(Math.round(maxWords * 0.8)));
+    .replace(/\{\{TARGET_WORDS\}\}/g, String(Math.round((minWords + maxWords) / 2)));
 
   const writerRaw = await gemini(env.GEMINI_MODEL || 'gemini-2.5-flash', {
     contents: [{ role: 'user', parts: [{ text: writerPrompt }] }],

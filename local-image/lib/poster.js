@@ -17,16 +17,21 @@ const crypto = require('crypto');
 const { escapeXml, measure, wrap, fitSize } = require('./svgutil');
 const diagrams = require('./diagrams');
 
+// Light palettes. Dark posters read as heavy in a light LinkedIn feed and
+// were rejected for it. `panel` is the fill for diagram boxes: a tint just off
+// the background, so boxes read as shapes without needing heavy borders.
 const THEMES = {
-  midnight: { bg0: '#0B1220', bg1: '#141F38', fg: '#F2F6FF', muted: '#8EA0C2', panel: '#16223C' },
-  slate:    { bg0: '#101418', bg1: '#1C2430', fg: '#F4F7FA', muted: '#93A3B8', panel: '#1B2430' },
-  plum:     { bg0: '#140D1F', bg1: '#241534', fg: '#F7F2FF', muted: '#A694C0', panel: '#231735' },
-  forest:   { bg0: '#07150F', bg1: '#102A1E', fg: '#EFFAF4', muted: '#88AF9D', panel: '#122C20' },
+  paper: { bg0: '#FFFFFF', bg1: '#EEF3FA', fg: '#0F172A', muted: '#475569', panel: '#F1F5F9' },
+  sand:  { bg0: '#FFFDF8', bg1: '#F5EEE1', fg: '#1C1917', muted: '#57534E', panel: '#F6F0E6' },
+  mint:  { bg0: '#FBFEFC', bg1: '#E4F3EB', fg: '#0B2A1E', muted: '#3F6457', panel: '#EAF5EF' },
+  sky:   { bg0: '#FAFCFF', bg1: '#E3EDFA', fg: '#0B1B33', muted: '#42597A', panel: '#EAF1FB' },
 };
 
+// Deep accents: the bright pastels used on the dark theme wash out on white.
+// Every pair keeps at least 4.5:1 contrast against the backgrounds above.
 const ACCENTS = [
-  ['#38BDF8', '#818CF8'], ['#F472B6', '#FB7185'], ['#34D399', '#22D3EE'],
-  ['#FBBF24', '#FB923C'], ['#A78BFA', '#60A5FA'], ['#2DD4BF', '#4ADE80'],
+  ['#1D4ED8', '#6D28D9'], ['#BE185D', '#B91C1C'], ['#047857', '#0E7490'],
+  ['#B45309', '#C2410C'], ['#6D28D9', '#1D4ED8'], ['#0F766E', '#15803D'],
 ];
 
 const SIZES = {
@@ -235,7 +240,9 @@ function buildSvg(input) {
   let points = (Array.isArray(opts.points) ? opts.points : [])
     .map(function (p) { return chipLabel(p, 54); })
     .filter(Boolean)
-    .slice(0, 2);
+    // Off unless asked for: the chips were research key points, and the first
+    // one was often about something the post did not discuss.
+    .slice(0, opts.chips ? 2 : 0);
 
   // Which diagram to draw. An explicit `visual` from the writer wins.
   //
@@ -307,7 +314,7 @@ function buildSvg(input) {
     '<stop offset="0%" stop-color="' + accentA + '"/>' +
     '<stop offset="100%" stop-color="' + accentB + '"/></linearGradient>';
   svg += '<radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">' +
-    '<stop offset="0%" stop-color="' + accentA + '" stop-opacity="0.30"/>' +
+    '<stop offset="0%" stop-color="' + accentA + '" stop-opacity="0.10"/>' +
     '<stop offset="100%" stop-color="' + accentA + '" stop-opacity="0"/></radialGradient>';
   svg += '<pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">' +
     '<circle cx="1.5" cy="1.5" r="1.5" fill="' + theme.fg + '" fill-opacity="0.06"/></pattern>';
