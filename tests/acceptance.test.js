@@ -733,6 +733,18 @@ test('Hashtags copied verbatim from the old prompt example are rejected', () => 
   assert.ok(real.ok, real.errors.join('; '));
 });
 
+test('Variants of "not just X, it is Y" are caught too', () => {
+  const v = require('../lib/validate');
+  for (const t of [
+    "This isn't just an implementation detail; it's vital for dependencies.",  // rejected draft, 06/11
+    'This is why try-with-resources is more than just syntax sugar.',          // published 29/10
+  ]) {
+    assert.ok(v.findTells(t).structural.some((x) => x.includes('not just')), 'missed: ' + t);
+  }
+  assert.strictEqual(v.findTells('It is just a wrapper around the stream, so close the outer one.').structural.length, 0,
+    'plain "just" must stay allowed');
+});
+
 test('Ordinary engineering words only warn, they do not block a post', () => {
   const v = require('../lib/validate');
   const tells = v.findTells('Robust error handling matters when you leverage a connection pool.');
