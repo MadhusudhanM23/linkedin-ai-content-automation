@@ -75,9 +75,14 @@ function centred(value, cx, cy, maxWidth, startSize, fill, opts) {
     Object.assign({ anchor: 'middle', weight: 700 }, o));
 }
 
+// Set by render() for the duration of one drawing. The canned captions are
+// generic ("finally runs on both paths") and can contradict the post's own
+// point, so the poster turns them off when it already prints a takeaway.
+let captionsOff = false;
+
 /** A caption under the drawing, naming what it shows. */
 function caption(value, cx, y, muted) {
-  if (!value) return '';
+  if (!value || captionsOff) return '';
   return txt(value, cx, y, 26, muted, { anchor: 'middle', weight: 600, opacity: 0.8 });
 }
 
@@ -1022,7 +1027,12 @@ DRAW.collections = function (c) {
  */
 function render(kind, ctx) {
   const draw = DRAW[kind] || DRAW.flow;
-  return draw(ctx);
+  captionsOff = ctx.caption === false;
+  try {
+    return draw(ctx);
+  } finally {
+    captionsOff = false;
+  }
 }
 
 module.exports = {

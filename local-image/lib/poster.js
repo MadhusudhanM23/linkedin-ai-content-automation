@@ -364,7 +364,9 @@ function buildSvg(input) {
   // drawing sits in the middle of the gap rather than stranding its caption at
   // the bottom of the frame.
   const availH = Math.max(MIN_DIAGRAM, L.diagramHeight);
-  const useH = Math.min(availH, 500);
+  // Capped well below the space available: the drawings sit at the top of
+  // their box, so a tall box left a dead gap under them.
+  const useH = Math.min(availH, conceptLines.length ? 400 : 460);
   svg += diagrams.render(kind, {
     x: PAD,
     y: L.diagramTop + (availH - useH) / 2,
@@ -376,6 +378,7 @@ function buildSvg(input) {
     muted: theme.muted,
     panel: theme.panel,
     labels: stageLabels(opts.points),
+    caption: conceptLines.length ? false : true,
     random: random,
   });
 

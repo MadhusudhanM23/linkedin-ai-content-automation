@@ -46,6 +46,13 @@ function test(name, fn) {
   }
 }
 
+/** Split prose into three paragraphs, as a real post is laid out. */
+function paras(text) {
+  const sentences = String(text).match(/[^.!?]+[.!?]+/g) || [String(text)];
+  const cut = (i) => Math.round((i * sentences.length) / 3);
+  return [0, 1, 2].map((i) => sentences.slice(cut(i), cut(i + 1)).join(' ').trim()).filter(Boolean).join('\n\n');
+}
+
 function section(title) {
   console.log('\n' + title);
   console.log('-'.repeat(title.length));
@@ -711,10 +718,10 @@ test('A narrowed angle passes the topic check when the headline carries the topi
     + 'One third has no finite decimal expansion, so the call cannot return an exact result and refuses to guess. '
     + 'Pass a MathContext or a scale and rounding mode and it returns the rounded value instead. '
     + 'Most production code wants the second form, and it is the one that is easy to forget to write.';
-  const rejected = v.validatePost(JSON.stringify({ post: body, hashtags: ['#Java'] }), 'Java API', { minWords: 40 });
+  const rejected = v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#Java'] }), 'Java API', { minWords: 40 });
   assert.ok(!rejected.ok, 'no topic word anywhere should still be rejected');
   assert.ok(rejected.errors.some((e) => /headline/.test(e)));
-  const accepted = v.validatePost(JSON.stringify({ post: body, hashtags: ['#Java'], title: 'Java divides, then refuses' }), 'Java API', { minWords: 40 });
+  const accepted = v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#Java'], title: 'Java divides, then refuses' }), 'Java API', { minWords: 40 });
   assert.ok(accepted.ok, 'the topic word in the published headline is enough: ' + accepted.errors.join('; '));
 });
 
@@ -724,11 +731,11 @@ test('Hashtags copied verbatim from the old prompt example are rejected', () => 
     + 'Reads made before the close can return stale timestamps if the archive changed underneath. '
     + 'Wrap it in try-with-resources and the close is guaranteed on every path, including the one that throws. '
     + 'That is the whole fix, and it is easy to forget when the FileSystem is created far from where it is used.';
-  const parrot = v.validatePost(JSON.stringify({ post: body, title: 'Java FileSystem cache trap',
+  const parrot = v.validatePost(JSON.stringify({ post: paras(body), title: 'Java FileSystem cache trap',
     hashtags: ['#DSA', '#Algorithms', '#SoftwareEngineering'] }), 'Java API', { minWords: 40 });
   assert.ok(!parrot.ok);
   assert.ok(parrot.errors.some((e) => /copied verbatim/.test(e)), parrot.errors.join('; '));
-  const real = v.validatePost(JSON.stringify({ post: body, title: 'Java FileSystem cache trap',
+  const real = v.validatePost(JSON.stringify({ post: paras(body), title: 'Java FileSystem cache trap',
     hashtags: ['#Java', '#NIO', '#SoftwareEngineering'] }), 'Java API', { minWords: 40 });
   assert.ok(real.ok, real.errors.join('; '));
 });
@@ -743,6 +750,22 @@ test('Variants of "not just X, it is Y" are caught too', () => {
   }
   assert.strictEqual(v.findTells('It is just a wrapper around the stream, so close the outer one.').structural.length, 0,
     'plain "just" must stay allowed');
+});
+
+test('A single block of text is rejected; three short paragraphs pass', () => {
+  const v = require('../lib/validate');
+  const body = 'Every stage of a CompletableFuture without an Executor runs on ForkJoinPool.commonPool. '.repeat(9);
+  const wall = v.validatePost(JSON.stringify({ post: body, title: 'Java pool', hashtags: ['#Java'] }), 'Java API', {});
+  assert.ok(wall.errors.some((e) => /1 block\(s\) of text/.test(e)), wall.errors.join('; '));
+  const laid = v.validatePost(JSON.stringify({ post: paras(body), title: 'Java pool', hashtags: ['#Java'] }), 'Java API', {});
+  assert.ok(laid.ok, laid.errors.join('; '));
+});
+
+test('Hype lines that say nothing about the mechanism are banned', () => {
+  const v = require('../lib/validate');
+  // From the 06/11 post: "This is huge for debugging."
+  assert.ok(v.findTells('This is huge for debugging.').banned.length > 0);
+  assert.ok(v.findTells('It is a lifesaver in production.').banned.length > 0);
 });
 
 test('Ordinary engineering words only warn, they do not block a post', () => {
@@ -878,6 +901,14 @@ test('The topic wins over an incidental word in the concept line', () => {
   });
   assert.ok(svg.includes('null'), 'expected the linked-list diagram');
   assert.ok(!svg.includes('A hit returns in microseconds'), 'drew the cache diagram instead');
+});
+
+test('The canned diagram caption is dropped when the poster has its own takeaway', () => {
+  const poster = require('../local-image/lib/poster');
+  const withTakeaway = poster.buildSvg({ topic: 'Java API', title: 'Suppressed exceptions', concept: 'Suppressed exceptions keep the close() failure.', visual: 'exception' });
+  assert.ok(!withTakeaway.includes('finally runs on both paths'), 'a generic caption must not contradict the takeaway');
+  const without = poster.buildSvg({ topic: 'Java API', title: 'Suppressed exceptions', visual: 'exception' });
+  assert.ok(without.includes('finally runs on both paths'), 'with no takeaway, the caption is still useful');
 });
 
 test('The poster still renders for every diagram kind', () => {
@@ -1074,12 +1105,12 @@ test('A post over the word limit is rejected, not trimmed', () => {
 test('The headline is the first line of the published post', () => {
   const v = require('../lib/validate');
   const body = 'Using CompletableFuture without an Executor runs every stage on ForkJoinPool.commonPool. '.repeat(10);
-  const r = v.validatePost(JSON.stringify({ post: body, title: "Java's Common Pool Can Starve", hashtags: ['#Java'] }), 'Java API', {});
+  const r = v.validatePost(JSON.stringify({ post: paras(body), title: "Java's Common Pool Can Starve", hashtags: ['#Java'] }), 'Java API', {});
   assert.ok(r.ok, r.errors.join('; '));
   assert.ok(r.post.commentary.startsWith("Java's Common Pool Can Starve\n\n"), 'headline must lead, above the "see more" fold');
   assert.ok(r.post.commentary.trim().endsWith('#Java'), 'hashtags still close the post');
   // Not doubled if the writer already opened with it.
-  const again = v.validatePost(JSON.stringify({ post: "Java's Common Pool Can Starve\n\n" + body, title: "Java's Common Pool Can Starve", hashtags: ['#Java'] }), 'Java API', {});
+  const again = v.validatePost(JSON.stringify({ post: "Java's Common Pool Can Starve\n\n" + paras(body), title: "Java's Common Pool Can Starve", hashtags: ['#Java'] }), 'Java API', {});
   assert.strictEqual(again.post.commentary.split("Java's Common Pool Can Starve").length - 1, 1);
 });
 
@@ -1098,7 +1129,7 @@ test('Hashtags do not count toward the word budget', () => {
     + 'Run out and every new socket fails, not only file reads. ';
   const words = v.countWords(body);
   const res = v.validatePost(JSON.stringify({
-    post: body + body + body, // ~114 words
+    post: paras(body + body + body), // ~114 words
     hashtags: ['#One', '#Two', '#Three', '#Four', '#Five', '#Six'],
   }), 'descriptor', {});
   assert.ok(res.ok, res.errors.join('; '));
@@ -1108,9 +1139,9 @@ test('Hashtags do not count toward the word budget', () => {
 test('The limits are configurable per run', () => {
   const v = require('../lib/validate');
   const body = 'The descriptor stays open until the process exits, and the collector cannot help. '.repeat(7); // ~98 words
-  assert.ok(v.validatePost(JSON.stringify({ post: body, hashtags: ['#J'] }), 'descriptor', {}).ok,
+  assert.ok(v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#J'] }), 'descriptor', {}).ok,
     '~100 words must pass the default 85-115 range');
-  const tight = v.validatePost(JSON.stringify({ post: body, hashtags: ['#J'] }), 'descriptor', { maxWords: 90 });
+  const tight = v.validatePost(JSON.stringify({ post: paras(body), hashtags: ['#J'] }), 'descriptor', { maxWords: 90 });
   assert.ok(!tight.ok, 'the same post must fail a cap of 90');
   assert.ok(tight.errors.some((e) => /the limit is 90/.test(e)));
 });
